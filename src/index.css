@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Inter:wght@300;400;600;800&family=Outfit:wght@300;400;600;800&family=Press+Start+2P&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-theme-bg: var(--theme-bg);
+  --color-theme-text-primary: var(--theme-text-primary);
+  --color-theme-text-secondary: var(--theme-text-secondary);
+  --color-theme-accent: var(--theme-accent);
+  --color-theme-accent-hover: var(--theme-accent-hover);
+  --color-theme-border: var(--theme-border);
+  --font-theme: var(--theme-font);
+}
+
+/* Thème par défaut: Classique Pub */
+:root {
+  --theme-bg: #0b2216; /* Vert forêt très sombre */
+  --theme-text-primary: #f5eae0; /* Crème */
+  --theme-text-secondary: #8c9e86; /* Vert sauge */
+  --theme-accent: #d4af37; /* Or métallique */
+  --theme-accent-hover: #bda132;
+  --theme-border: #234731;
+  --theme-font: 'Cinzel', 'Georgia', serif;
+}
+
+.theme-pub {
+  --theme-bg: #0b2216;
+  --theme-text-primary: #f5eae0;
+  --theme-text-secondary: #8c9e86;
+  --theme-accent: #d4af37;
+  --theme-accent-hover: #bda132;
+  --theme-border: #234731;
+  --theme-font: 'Cinzel', 'Georgia', serif;
+}
+
+.theme-arcade {
+  --theme-bg: #05010a; /* Noir cosmique ultra profond */
+  --theme-text-primary: #ffffff; /* Blanc pur */
+  --theme-text-secondary: #ff007f; /* Rose néon vibrant */
+  --theme-accent: #00f0ff; /* Cyan électrique */
+  --theme-accent-hover: #00d5e2;
+  --theme-border: #ff007f;
+  --theme-font: 'Press Start 2P', 'Courier New', monospace;
+}
+
+.theme-modern {
+  --theme-bg: #0a0a0a; /* Gris anthracite profond */
+  --theme-text-primary: #ffffff; /* Blanc */
+  --theme-text-secondary: #888888; /* Gris moyen */
+  --theme-accent: #38bdf8; /* Bleu ciel électrique */
+  --theme-accent-hover: #0ea5e9;
+  --theme-border: #1f1f1f;
+  --theme-font: 'Outfit', 'Inter', sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  font-family: var(--theme-font);
+  background-color: #000000;
+  color: var(--theme-text-primary);
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+/* Animations de néon pour le thème arcade */
+.theme-arcade .neon-glow-text {
+  text-shadow: 0 0 5px var(--theme-accent), 0 0 15px var(--theme-accent);
+}
+
+.theme-arcade .neon-glow-border {
+  box-shadow: 0 0 5px var(--theme-accent), inset 0 0 5px var(--theme-accent);
+  border-color: var(--theme-accent);
+}
+
+.theme-arcade .neon-glow-pink-text {
+  text-shadow: 0 0 5px var(--theme-text-secondary), 0 0 15px var(--theme-text-secondary);
+}
+
+/* Reset full-width for root element of index.html */
+#root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
