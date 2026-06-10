@@ -10,9 +10,10 @@ Minou Dart est une application web (PWA) de scoring de fléchettes conçue pour 
 - **État de l'application :** Stockage local (LocalStorage/IndexedDB) pour garder la partie en cache en cas de rafraîchissement accidentel.
 
 ### 3. Interface et Affichage (Les 2 Vues)
-- **Vue Vidéoprojecteur (Affichage Passif) :**
-  - Moitié gauche (50% de l'écran, vertical) : Fond `#FFFFFF` pur, sans aucun élément, pour éclairer la cible.
-  - Moitié droite (50% de l'écran, vertical) : Fond sombre (Dark Mode). Affiche le tableau des scores, les statistiques, le joueur actif et les animations.
+- **Vue Vidéoprojecteur (Affichage Passif / Spectateur) :**
+  - **Quart en haut à gauche (25% de l'écran, carré) :** Fond `#FFFFFF` pur, sans aucun élément ni texte en superposition (réservé à l'emplacement de la cible physique).
+  - **Quart en haut à droite :** Zone d'information dynamique mise à jour au fur et à mesure de la partie.
+  - **Reste de l'écran (moitié inférieure) :** Fond sombre (Dark Mode). Affiche le tableau des scores, les statistiques, le joueur actif et les animations.
 - **Vue Télécommande (Mobile) :**
   - Mode paysage ou portrait (optimisé pour la saisie à une main).
   - Comprend le pavé numérique et les modificateurs de tir.

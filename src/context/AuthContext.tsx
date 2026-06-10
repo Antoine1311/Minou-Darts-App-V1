@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+import type { User } from 'firebase/auth';
+import { signInAnonymously, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '../firebase';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   loginAnonymously: () => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -48,6 +50,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const loginWithGoogle = async () => {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Erreur de connexion Google :", error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const logout = async () => {
     setLoading(true);
     try {
@@ -61,7 +76,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginAnonymously, logout }}>
+    <AuthContext.Provider value={{ user, loading, loginAnonymously, loginWithGoogle, logout }}>
       {children}
     </AuthContext.Provider>
   );

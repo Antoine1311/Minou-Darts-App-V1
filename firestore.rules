@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{roomId} {
+      // Autoriser la lecture aux utilisateurs authentifiés anonymement
+      allow read: if request.auth != null;
+      
+      // Autoriser la création si l'utilisateur est authentifié et définit creatorId avec son uid
+      allow create: if request.auth != null 
+                    && request.resource.data.creatorId == request.auth.uid;
+                    
+      // Autoriser la mise à jour si l'utilisateur est authentifié (les télécommandes)
+      allow update: if request.auth != null;
+      
+      // (Optionnel) Autoriser la suppression uniquement au créateur
+      allow delete: if request.auth != null && resource.data.creatorId == request.auth.uid;
+    }
+  }
+}

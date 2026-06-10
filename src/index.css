@@ -84,3 +84,66 @@ body {
   padding: 0;
   box-sizing: border-box;
 }
+
+/* Verrouillage Mode Paysage pour la Télécommande Mobile */
+@media (orientation: landscape) and (max-width: 900px) {
+  .remote-view-container {
+    display: none !important;
+  }
+  body::before {
+    content: "Veuillez tourner votre appareil en mode portrait pour utiliser la télécommande.";
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: var(--theme-bg, #000);
+    color: var(--theme-accent, #fff);
+    font-family: var(--theme-font, sans-serif);
+    font-size: 1.2rem;
+    font-weight: bold;
+    text-align: center;
+    padding: 2rem;
+    z-index: 9999;
+  }
+}
+
+/* ─── Optimisations Android / Chrome (cible : Xiaomi 14, HyperOS) ─────────── */
+
+/* 1. Suppression du flash de tap bleu/orange de Chrome Android sur tous les éléments interactifs */
+*, *::before, *::after {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 2. Prévention du "pull-to-refresh" accidentel en cours de partie
+   (très fréquent sur Android quand on swipe vers le bas sur le pavé) */
+.remote-view-container {
+  overscroll-behavior: none;
+  /* Inertie de scroll fluide (Android WebView) */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 3. Utiliser 100svh (small viewport height) comme fallback stable sur Chrome Android.
+   100dvh est préféré mais certaines versions de HyperOS ont des comportements
+   incohérents avec la barre d'URL rétractable. On utilise svh comme base sûre. */
+body,
+#root {
+  min-height: 100svh;
+}
+
+/* 4. Prévention du zoom double-tap sur les boutons du pavé (Android Chrome)
+   touch-action: manipulation est déjà sur chaque bouton via Tailwind,
+   mais on le force ici en global pour les éléments non couverts. */
+button, a, [role="button"] {
+  touch-action: manipulation;
+}
+
+/* 5. Rendu de texte optimisé pour les écrans haute densité (Xiaomi 14 = 460 ppi) */
+.remote-view-container {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}

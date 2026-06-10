@@ -10,15 +10,12 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Récupérer le thème stocké ou par défaut 'pub'
-  const [theme, setThemeState] = useState<ThemeType>(() => {
-    const savedTheme = localStorage.getItem('minou-dart-theme');
-    return (savedTheme as ThemeType) || 'pub';
-  });
+  // Forcer le thème modern comme unique thème de l'application
+  const [theme, setThemeState] = useState<ThemeType>('modern');
 
-  const setTheme = (newTheme: ThemeType) => {
-    setThemeState(newTheme);
-    localStorage.setItem('minou-dart-theme', newTheme);
+  const setTheme = (_newTheme: ThemeType) => {
+    // Ignorer le changement pour conserver uniquement 'modern'
+    setThemeState('modern');
   };
 
   // Appliquer le thème sur le body de la page
@@ -29,7 +26,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     body.classList.remove('theme-pub', 'theme-arcade', 'theme-modern');
     
     // Ajouter la nouvelle classe de thème
-    body.classList.add(`theme-${theme}`);
+    body.classList.add('theme-modern');
   }, [theme]);
 
   return (
@@ -46,3 +43,4 @@ export const useTheme = () => {
   }
   return context;
 };
+
