@@ -13,15 +13,18 @@ import {
 } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
 import { db, auth } from '../firebase';
+import { playerService } from './playerService';
 import type { ThemeType } from '../context/ThemeContext';
 
-/** Type de jeu : X01 (décompte), Cricket (fermeture de cibles) ou Bart (tennis) */
-export type GameType = 'x01' | 'cricket' | 'bart';
+/** Type de jeu : X01 (décompte), Cricket (fermeture de cibles), Bart (tennis) ou Clock (Tour de l'horloge) */
+export type GameType = 'x01' | 'cricket' | 'bart' | 'clock';
+
 
 /** Variante de Cricket : Classique, Crazy (aléatoire), Tactical (non-adjacent) */
 export type CricketVariant = 'classic' | 'crazy' | 'tactical';
 
 export interface Player {
+  globalId?: string;            // ID of the persistent cloud player profile
   name: string;
   emoji?: string;
   score: number;                // X01 : points restants | Cricket : points marqués (scoring offensif/défensif)
@@ -59,6 +62,37 @@ export interface Player {
     heatMap: Record<string, { attempts: number; success: number; perfects?: number }>; // Statistiques des zones préférentielles
     gamesStreak: number; // Nombre de jeux consécutifs gagnés
   };
+  // === Clock spécifique ===
+  clockState?: {
+    currentTarget: number;
+    throwsCount: number;
+    hitsCount: number;
+    accuracy: number;
+    targetHistory: number[];
+    throwHistory: boolean[];
+  };
+}
+
+export interface CalibrationSettings {
+  centerX: number;
+  centerY: number;
+  radius: number;
+  rDoubleOuter: number;
+  rDoubleInner: number;
+  rTripleOuter: number;
+  rTripleInner: number;
+  rBullOuter: number;
+  rBullInner: number;
+  haloWhiteRadius?: number;
+  haloMaxRadius?: number;
+  statsPanelY?: number;
+  statsPanelX?: number;
+  statsFontSize?: number;
+  commentsFontSize?: number;
+  statsFontScaleX?: number;
+  statsFontScaleY?: number;
+  statsPanelWidth?: number;
+  statsPanelHeight?: number;
 }
 
 export interface RoomData {
@@ -85,6 +119,7 @@ export interface RoomData {
       timestamp: number;
     };
     historyStates?: string[];
+    inputMethod?: 'keyboard' | 'target';
   };
   activePlayerIndex: number;
   status: 'setup' | 'playing' | 'finished';
@@ -93,6 +128,12 @@ export interface RoomData {
   creatorId: string;
   winnerName?: string;
   lastUpdate?: any;
+  projectorMode?: 'classic' | 'fullscreen' | 'ar'; // Mode de vue du projecteur, synchronisé en temps réel
+  calibration?: CalibrationSettings; // Paramètres de calibrage de la cible en Réalité Augmentée
+  isCalibrating?: boolean; // Indique si la calibration est en cours (pour synchroniser l'affichage de la cible avec la télécommande)
+  clockConfig?: {
+    includeBull: boolean;
+  };
 }
 
 // Générer un code de salon à 4 caractères majuscules simples (ex: "MN42")
@@ -126,23 +167,7 @@ export const roomService = {
       cricketScoringMode: 'standard', // par défaut
       activePlayerIndex: 0,
       status: 'setup',
-      players: [
-        { 
-          name: 'Joueur 1', 
-          emoji: '🎯',
-          score: gameType === 'x01' ? targetScore : 0, 
-          scoreBeforeRound: gameType === 'x01' ? targetScore : 0, 
-          avg: 0, 
-          dartsLeft: 3, 
-          throwsCount: 0, 
-          totalPoints: 0, 
-          history: [],
-          bestRound: 0,
-          lastRoundScore: 0,
-          roundScores: [],
-          bustsCount: 0
-        }
-      ],
+      players: [],
       createdAt: serverTimestamp(),
       creatorId
     };
@@ -319,6 +344,17 @@ export const roomService = {
       status: nextRoomState.status,
       winnerName: nextRoomState.winnerName
     });
+
+    // Si la partie vient de se terminer, on met à jour les statistiques de tous les joueurs
+    if (room.status !== 'finished' && nextRoomState.status === 'finished') {
+      for (const p of nextRoomState.players) {
+        if (p.globalId) {
+          const won = p.name === nextRoomState.winnerName;
+          // Ignorer l'attente pour ne pas bloquer l'UI
+          playerService.updatePlayerStats(p.globalId, won, p.totalPoints, p.throwsCount).catch(console.error);
+        }
+      }
+    }
   },
 
   /**
@@ -330,6 +366,17 @@ export const roomService = {
     const { updatedRoom } = processCricketThrow(room, baseNumber, multiplier);
     
     await roomService.updateRoom(roomId, updatedRoom);
+
+    // Si la partie vient de se terminer, on met à jour les statistiques de tous les joueurs
+    if (room.status !== 'finished' && updatedRoom.status === 'finished' && updatedRoom.players) {
+      for (const p of updatedRoom.players) {
+        if (p.globalId) {
+          const won = p.name === updatedRoom.winnerName;
+          // Ignorer l'attente pour ne pas bloquer l'UI
+          playerService.updatePlayerStats(p.globalId, won, p.totalPoints, p.throwsCount).catch(console.error);
+        }
+      }
+    }
   },
 
   /**

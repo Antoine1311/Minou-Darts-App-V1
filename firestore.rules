@@ -15,5 +15,16 @@ service cloud.firestore {
       // (Optionnel) Autoriser la suppression uniquement au créateur
       allow delete: if request.auth != null && resource.data.creatorId == request.auth.uid;
     }
+    
+    match /players/{playerId} {
+      // Un utilisateur peut lire les joueurs s'il est authentifié
+      allow read: if request.auth != null;
+      
+      // Un utilisateur peut créer un joueur et l'associer à son ID
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      
+      // Un utilisateur ne peut modifier/supprimer que SES propres joueurs
+      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    }
   }
 }

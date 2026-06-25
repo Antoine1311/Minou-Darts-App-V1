@@ -776,709 +776,95 @@ export const DOUBLE_OUT_CHECKOUTS: Record<number, string[]> = {
   ]
 };
 
-export const NORMAL_OUT_CHECKOUTS: Record<number, string[]> = {
-  "1": [
-    "S1"
-  ],
-  "2": [
-    "D1"
-  ],
-  "3": [
-    "T1"
-  ],
-  "4": [
-    "D2"
-  ],
-  "5": [
-    "S5"
-  ],
-  "6": [
-    "T2"
-  ],
-  "7": [
-    "S7"
-  ],
-  "8": [
-    "D4"
-  ],
-  "9": [
-    "T3"
-  ],
-  "10": [
-    "D5"
-  ],
-  "11": [
-    "S11"
-  ],
-  "12": [
-    "T4"
-  ],
-  "13": [
-    "S13"
-  ],
-  "14": [
-    "D7"
-  ],
-  "15": [
-    "T5"
-  ],
-  "16": [
-    "D8"
-  ],
-  "17": [
-    "S17"
-  ],
-  "18": [
-    "T6"
-  ],
-  "19": [
-    "S19"
-  ],
-  "20": [
-    "D10"
-  ],
-  "21": [
-    "T7"
-  ],
-  "22": [
-    "D11"
-  ],
-  "23": [
-    "T1",
-    "D10"
-  ],
-  "24": [
-    "T8"
-  ],
-  "25": [
-    "S25"
-  ],
-  "26": [
-    "D13"
-  ],
-  "27": [
-    "T9"
-  ],
-  "28": [
-    "D14"
-  ],
-  "29": [
-    "T1",
-    "D13"
-  ],
-  "30": [
-    "T10"
-  ],
-  "31": [
-    "T1",
-    "D14"
-  ],
-  "32": [
-    "D16"
-  ],
-  "33": [
-    "T11"
-  ],
-  "34": [
-    "D17"
-  ],
-  "35": [
-    "T1",
-    "D16"
-  ],
-  "36": [
-    "T12"
-  ],
-  "37": [
-    "T1",
-    "D17"
-  ],
-  "38": [
-    "D19"
-  ],
-  "39": [
-    "T13"
-  ],
-  "40": [
-    "D20"
-  ],
-  "41": [
-    "T1",
-    "D19"
-  ],
-  "42": [
-    "T14"
-  ],
-  "43": [
-    "T1",
-    "D20"
-  ],
-  "44": [
-    "T2",
-    "D19"
-  ],
-  "45": [
-    "T15"
-  ],
-  "46": [
-    "T2",
-    "D20"
-  ],
-  "47": [
-    "T3",
-    "D19"
-  ],
-  "48": [
-    "T16"
-  ],
-  "49": [
-    "T3",
-    "D20"
-  ],
-  "50": [
-    "BULL"
-  ],
-  "51": [
-    "T17"
-  ],
-  "52": [
-    "T4",
-    "D20"
-  ],
-  "53": [
-    "T1",
-    "BULL"
-  ],
-  "54": [
-    "T18"
-  ],
-  "55": [
-    "T5",
-    "D20"
-  ],
-  "56": [
-    "T2",
-    "BULL"
-  ],
-  "57": [
-    "T19"
-  ],
-  "58": [
-    "T6",
-    "D20"
-  ],
-  "59": [
-    "T3",
-    "BULL"
-  ],
-  "60": [
-    "T20"
-  ],
-  "61": [
-    "T7",
-    "D20"
-  ],
-  "62": [
-    "T4",
-    "BULL"
-  ],
-  "63": [
-    "T1",
-    "T20"
-  ],
-  "64": [
-    "T8",
-    "D20"
-  ],
-  "65": [
-    "T5",
-    "BULL"
-  ],
-  "66": [
-    "T2",
-    "T20"
-  ],
-  "67": [
-    "T9",
-    "D20"
-  ],
-  "68": [
-    "T6",
-    "BULL"
-  ],
-  "69": [
-    "T3",
-    "T20"
-  ],
-  "70": [
-    "T10",
-    "D20"
-  ],
-  "71": [
-    "T7",
-    "BULL"
-  ],
-  "72": [
-    "T4",
-    "T20"
-  ],
-  "73": [
-    "T11",
-    "D20"
-  ],
-  "74": [
-    "T8",
-    "BULL"
-  ],
-  "75": [
-    "T5",
-    "T20"
-  ],
-  "76": [
-    "T12",
-    "D20"
-  ],
-  "77": [
-    "T9",
-    "BULL"
-  ],
-  "78": [
-    "T6",
-    "T20"
-  ],
-  "79": [
-    "T13",
-    "D20"
-  ],
-  "80": [
-    "T10",
-    "BULL"
-  ],
-  "81": [
-    "T7",
-    "T20"
-  ],
-  "82": [
-    "T14",
-    "D20"
-  ],
-  "83": [
-    "T11",
-    "BULL"
-  ],
-  "84": [
-    "T8",
-    "T20"
-  ],
-  "85": [
-    "T15",
-    "D20"
-  ],
-  "86": [
-    "T12",
-    "BULL"
-  ],
-  "87": [
-    "T9",
-    "T20"
-  ],
-  "88": [
-    "T16",
-    "D20"
-  ],
-  "89": [
-    "T13",
-    "BULL"
-  ],
-  "90": [
-    "T10",
-    "T20"
-  ],
-  "91": [
-    "T17",
-    "D20"
-  ],
-  "92": [
-    "T14",
-    "BULL"
-  ],
-  "93": [
-    "T11",
-    "T20"
-  ],
-  "94": [
-    "T18",
-    "D20"
-  ],
-  "95": [
-    "T15",
-    "BULL"
-  ],
-  "96": [
-    "T12",
-    "T20"
-  ],
-  "97": [
-    "T19",
-    "D20"
-  ],
-  "98": [
-    "T16",
-    "BULL"
-  ],
-  "99": [
-    "T13",
-    "T20"
-  ],
-  "100": [
-    "T20",
-    "D20"
-  ],
-  "101": [
-    "T17",
-    "BULL"
-  ],
-  "102": [
-    "T14",
-    "T20"
-  ],
-  "103": [
-    "T1",
-    "T20",
-    "D20"
-  ],
-  "104": [
-    "T18",
-    "BULL"
-  ],
-  "105": [
-    "T15",
-    "T20"
-  ],
-  "106": [
-    "T2",
-    "T20",
-    "D20"
-  ],
-  "107": [
-    "T19",
-    "BULL"
-  ],
-  "108": [
-    "T16",
-    "T20"
-  ],
-  "109": [
-    "T3",
-    "T20",
-    "D20"
-  ],
-  "110": [
-    "T20",
-    "BULL"
-  ],
-  "111": [
-    "T17",
-    "T20"
-  ],
-  "112": [
-    "T4",
-    "T20",
-    "D20"
-  ],
-  "113": [
-    "T1",
-    "T20",
-    "BULL"
-  ],
-  "114": [
-    "T18",
-    "T20"
-  ],
-  "115": [
-    "T5",
-    "T20",
-    "D20"
-  ],
-  "116": [
-    "T2",
-    "T20",
-    "BULL"
-  ],
-  "117": [
-    "T19",
-    "T20"
-  ],
-  "118": [
-    "T6",
-    "T20",
-    "D20"
-  ],
-  "119": [
-    "T3",
-    "T20",
-    "BULL"
-  ],
-  "120": [
-    "T20",
-    "T20"
-  ],
-  "121": [
-    "T7",
-    "T20",
-    "D20"
-  ],
-  "122": [
-    "T4",
-    "T20",
-    "BULL"
-  ],
-  "123": [
-    "T1",
-    "T20",
-    "T20"
-  ],
-  "124": [
-    "T8",
-    "T20",
-    "D20"
-  ],
-  "125": [
-    "T5",
-    "T20",
-    "BULL"
-  ],
-  "126": [
-    "T2",
-    "T20",
-    "T20"
-  ],
-  "127": [
-    "T9",
-    "T20",
-    "D20"
-  ],
-  "128": [
-    "T6",
-    "T20",
-    "BULL"
-  ],
-  "129": [
-    "T3",
-    "T20",
-    "T20"
-  ],
-  "130": [
-    "T10",
-    "T20",
-    "D20"
-  ],
-  "131": [
-    "T7",
-    "T20",
-    "BULL"
-  ],
-  "132": [
-    "T4",
-    "T20",
-    "T20"
-  ],
-  "133": [
-    "T11",
-    "T20",
-    "D20"
-  ],
-  "134": [
-    "T8",
-    "T20",
-    "BULL"
-  ],
-  "135": [
-    "T5",
-    "T20",
-    "T20"
-  ],
-  "136": [
-    "T12",
-    "T20",
-    "D20"
-  ],
-  "137": [
-    "T9",
-    "T20",
-    "BULL"
-  ],
-  "138": [
-    "T6",
-    "T20",
-    "T20"
-  ],
-  "139": [
-    "T13",
-    "T20",
-    "D20"
-  ],
-  "140": [
-    "T10",
-    "T20",
-    "BULL"
-  ],
-  "141": [
-    "T7",
-    "T20",
-    "T20"
-  ],
-  "142": [
-    "T14",
-    "T20",
-    "D20"
-  ],
-  "143": [
-    "T11",
-    "T20",
-    "BULL"
-  ],
-  "144": [
-    "T8",
-    "T20",
-    "T20"
-  ],
-  "145": [
-    "T15",
-    "T20",
-    "D20"
-  ],
-  "146": [
-    "T12",
-    "T20",
-    "BULL"
-  ],
-  "147": [
-    "T9",
-    "T20",
-    "T20"
-  ],
-  "148": [
-    "T16",
-    "T20",
-    "D20"
-  ],
-  "149": [
-    "T13",
-    "T20",
-    "BULL"
-  ],
-  "150": [
-    "T10",
-    "T20",
-    "T20"
-  ],
-  "151": [
-    "T17",
-    "T20",
-    "D20"
-  ],
-  "152": [
-    "T14",
-    "T20",
-    "BULL"
-  ],
-  "153": [
-    "T11",
-    "T20",
-    "T20"
-  ],
-  "154": [
-    "T18",
-    "T20",
-    "D20"
-  ],
-  "155": [
-    "T15",
-    "T20",
-    "BULL"
-  ],
-  "156": [
-    "T12",
-    "T20",
-    "T20"
-  ],
-  "157": [
-    "T19",
-    "T20",
-    "D20"
-  ],
-  "158": [
-    "T16",
-    "T20",
-    "BULL"
-  ],
-  "159": [
-    "T13",
-    "T20",
-    "T20"
-  ],
-  "160": [
-    "T20",
-    "T20",
-    "D20"
-  ],
-  "161": [
-    "T17",
-    "T20",
-    "BULL"
-  ],
-  "162": [
-    "T14",
-    "T20",
-    "T20"
-  ],
-  "164": [
-    "T18",
-    "T20",
-    "BULL"
-  ],
-  "165": [
-    "T15",
-    "T20",
-    "T20"
-  ],
-  "167": [
-    "T19",
-    "T20",
-    "BULL"
-  ],
-  "168": [
-    "T16",
-    "T20",
-    "T20"
-  ],
-  "170": [
-    "T20",
-    "T20",
-    "BULL"
-  ],
-  "171": [
-    "T17",
-    "T20",
-    "T20"
-  ],
-  "174": [
-    "T18",
-    "T20",
-    "T20"
-  ],
-  "177": [
-    "T19",
-    "T20",
-    "T20"
-  ],
-  "180": [
-    "T20",
-    "T20",
-    "T20"
-  ]
-};
+export const NORMAL_OUT_CHECKOUTS: Record<number, string[]> = (() => {
+  const targets: { name: string; value: number; difficulty: number }[] = [];
+
+  // Simples (S1-S20)
+  for (let i = 1; i <= 20; i++) {
+    targets.push({ name: `S${i}`, value: i, difficulty: 1.0 });
+  }
+
+  // Simple Bull (S25)
+  targets.push({ name: 'S25', value: 25, difficulty: 3.0 });
+
+  // Doubles (D1-D20)
+  for (let i = 1; i <= 20; i++) {
+    targets.push({ name: `D${i}`, value: i * 2, difficulty: 4.0 });
+  }
+
+  // Triples (T1-T20)
+  for (let i = 1; i <= 20; i++) {
+    targets.push({ name: `T${i}`, value: i * 3, difficulty: 5.0 });
+  }
+
+  // Double Bull (BULL)
+  targets.push({ name: 'BULL', value: 50, difficulty: 7.0 });
+
+  function getTargetValue(name: string): number {
+    if (name === 'BULL') return 50;
+    if (name === 'S25') return 25;
+    const num = parseInt(name.substring(1), 10);
+    if (name.startsWith('S')) return num;
+    if (name.startsWith('D')) return num * 2;
+    if (name.startsWith('T')) return num * 3;
+    return 0;
+  }
+
+  function findBestCheckout(score: number): string[] {
+    let bestCombination: string[] = [];
+    let minDifficulty = Infinity;
+    
+    // 1 fléchette
+    for (const t1 of targets) {
+      if (t1.value === score) {
+        const diff = t1.difficulty;
+        if (diff < minDifficulty) {
+          minDifficulty = diff;
+          bestCombination = [t1.name];
+        }
+      }
+    }
+    
+    // 2 fléchettes
+    for (const t1 of targets) {
+      for (const t2 of targets) {
+        if (t1.value + t2.value === score) {
+          const diff = t1.difficulty + t2.difficulty;
+          if (diff < minDifficulty) {
+            minDifficulty = diff;
+            bestCombination = [t1.name, t2.name].sort((a, b) => getTargetValue(b) - getTargetValue(a));
+          }
+        }
+      }
+    }
+    
+    // 3 fléchettes
+    for (const t1 of targets) {
+      for (const t2 of targets) {
+        for (const t3 of targets) {
+          if (t1.value + t2.value + t3.value === score) {
+            const diff = t1.difficulty + t2.difficulty + t3.difficulty;
+            if (diff < minDifficulty) {
+              minDifficulty = diff;
+              bestCombination = [t1.name, t2.name, t3.name].sort((a, b) => getTargetValue(b) - getTargetValue(a));
+            }
+          }
+        }
+      }
+    }
+    
+    return bestCombination;
+  }
+
+  const checkouts: Record<number, string[]> = {};
+  for (let s = 1; s <= 180; s++) {
+    const combo = findBestCheckout(s);
+    if (combo.length > 0) {
+      checkouts[s] = combo;
+    }
+  }
+  return checkouts;
+})()
 
 /**
  * Récupère la suggestion de finition (checkout) pour un score donné et un mode de jeu.

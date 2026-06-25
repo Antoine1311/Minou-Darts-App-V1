@@ -21,8 +21,16 @@ export const createEmptyBartState = () => ({
 // Helper pour sauvegarder l'état actuel avant modification
 const pushHistory = (room: RoomData): string[] => {
   const history = room.bartConfig?.historyStates || [];
+  // On crée une copie propre de la pièce sans l'historique pour éviter une sérialisation récursive
+  const cleanRoom: RoomData = {
+    ...room,
+    bartConfig: room.bartConfig ? {
+      ...room.bartConfig,
+      historyStates: []
+    } : undefined
+  };
   // On garde les 15 dernières actions pour éviter de surcharger Firestore
-  const newHistory = [...history, JSON.stringify(room)].slice(-15);
+  const newHistory = [...history, JSON.stringify(cleanRoom)].slice(-15);
   return newHistory;
 };
 
@@ -35,6 +43,10 @@ export const undoBartAction = (room: RoomData): RoomData => {
   }
   const lastStateStr = room.bartConfig.historyStates[room.bartConfig.historyStates.length - 1];
   const lastState = JSON.parse(lastStateStr) as RoomData;
+  // On restaure la liste d'historique précédente moins l'état restauré
+  if (lastState.bartConfig) {
+    lastState.bartConfig.historyStates = room.bartConfig.historyStates.slice(0, -1);
+  }
   return lastState;
 };
 
