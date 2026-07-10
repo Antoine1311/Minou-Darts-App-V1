@@ -237,14 +237,10 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
         </div>
       )}
 
-      {/* Liste des joueurs adaptative (grille ou flex) - avec min-h-0 pour forcer le rétrécissement flexbox */}
+      {/* Liste des joueurs avec défilement vertical systématique */}
       <div 
         ref={playerListRef}
-        className={`flex-grow overflow-y-auto min-h-0 p-3 bg-black ${
-          players.length >= 4
-            ? 'grid grid-cols-2 gap-3 content-start'
-            : 'flex flex-col space-y-4'
-        }`}
+        className="flex-grow overflow-y-auto min-h-0 p-3 bg-black flex flex-col space-y-4"
       >
         {players.map((player, idx) => {
           const isActive = activePlayerIndex === idx;
@@ -281,184 +277,73 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
             maximumFractionDigits: 2
           });
 
-          const isGrid = numPlayers >= 4;
-          const scoreSizeClass = isGrid 
-            ? 'text-4xl sm:text-5xl font-black' 
-            : 'text-6xl sm:text-7xl font-black';
-          const nameSizeClass = isGrid
-            ? 'text-sm sm:text-base font-extrabold'
-            : 'text-xl sm:text-2xl font-extrabold';
-          const cardPaddingClass = isGrid
-            ? 'p-2 rounded-xl'
-            : 'p-2 sm:p-3 rounded-2xl';
+          const scoreSizeClass = 'text-6xl sm:text-7xl font-black';
+          const nameSizeClass = 'text-xl sm:text-2xl font-extrabold';
+          const cardPaddingClass = 'p-2 sm:p-3 rounded-2xl';
 
-          // --- RENDU PLEINE LARGEUR (1 À 3 JOUEURS) ---
-          if (!isGrid) {
-            return (
-              <div 
-                key={player.name} 
-                data-active-player={isActive ? "true" : "false"}
-                className={`relative flex flex-col transition-all border ${cardPaddingClass} ${
-                  isActive 
-                    ? 'active-player-card bg-zinc-900/95 border-[#22c55e] shadow-[0_0_15px_rgba(34,197,94,0.15)] ring-1 ring-[#22c55e]/25' 
-                    : player.roundBust
-                      ? 'bg-[#1a0f0f] border-red-500/30 opacity-90'
-                      : 'bg-zinc-950 border-zinc-900/60 opacity-80'
-                }`}
-              >
-                {/* Ligne 1 : Infos principales (Gauche: nom, fléchettes. Droite: score) */}
-                <div className="flex items-center justify-between gap-2">
-                  {/* Gauche : Nom, Statut, Finition, Volée */}
-                  <div className="flex flex-col justify-center min-w-0 flex-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`${nameSizeClass} tracking-wide uppercase truncate flex items-center gap-2 ${
-                        isActive ? 'text-[#22c55e]' : 'text-zinc-300'
-                      }`}>
-                        <span className="truncate">{player.name}</span>
-                        <span className="text-xl sm:text-2xl flex-shrink-0">{player.emoji || '🎯'}</span>
-                      </span>
-                      {isActive && (
-                        <span className="flex-shrink-0 flex items-center justify-center w-2.5 h-2.5 rounded-full bg-[#22c55e] animate-pulse" />
-                      )}
-                      {player.roundBust && (
-                        <span className="flex-shrink-0 text-[10px] sm:text-xs bg-red-600/95 text-white font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">
-                          Bust
-                        </span>
-                      )}
-                    </div>
-                    
-                    {/* Statut et Finition intégrée */}
-                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                      <span className="text-xs sm:text-sm text-zinc-500 font-bold truncate">
-                        {isActive ? `En cours — ${player.dartsLeft} flèche(s)` : 'En attente'}
-                      </span>
-                      {isActive && currentRoom?.gameType === 'x01' && player.score <= 180 && player.score > 1 && (
-                        <span className="text-[10px] sm:text-xs text-[#22c55e] font-black tracking-widest bg-[#22c55e]/10 border border-[#22c55e]/20 px-2 py-0.5 rounded shadow-sm">
-                          {getCheckoutSuggestion(player.score, !!currentRoom.doubleOut)?.join(' › ')}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Volée en cours (les 3 carrés) intégrée sous le nom au lieu d'être absolue */}
-                    {(isActive || roundSum > 0 || roundThrows.length > 0 || player.roundBust) && (
-                      <div className="flex items-center gap-1.5 mt-2">
-                        {player.roundBust ? (
-                          <span className="text-sm sm:text-base text-red-500 font-black tracking-widest animate-pulse h-10 flex items-center">
-                            BUST ❌
-                          </span>
-                        ) : (
-                          <>
-                            {[dart1, dart2, dart3].map((dart, dIdx) => {
-                              const isBustDart = player.roundBust && dart && dIdx === roundThrows.length - 1;
-                              return (
-                                <div 
-                                  key={dIdx} 
-                                  className={`w-12 h-10 sm:w-16 sm:h-12 rounded-lg border-2 flex items-center justify-center text-lg sm:text-xl font-black transition-all duration-300 shadow-md ${
-                                    isBustDart
-                                      ? 'border-red-500/60 bg-red-950/20 text-red-400'
-                                      : dart 
-                                        ? 'border-zinc-700 text-white bg-zinc-900' 
-                                        : 'border-zinc-900 text-transparent bg-black/40'
-                                  }`}
-                                >
-                                  {dart}
-                                </div>
-                              );
-                            })}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Droite : Score géant + Points du tour */}
-                  <div className="flex flex-col items-end flex-shrink-0 ml-2">
-                    <span className={`tracking-tighter leading-none ${
-                      player.roundBust 
-                        ? 'text-red-400/90' 
-                        : isActive 
-                          ? 'text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.15)]' 
-                          : 'text-zinc-400'
-                    } ${scoreSizeClass}`}>
-                      {player.score}
-                    </span>
-                    <div className="flex items-center gap-1 mt-1 font-bold text-[13px] sm:text-sm uppercase tracking-wider">
-                      {(roundSum > 0 || roundThrows.length > 0) ? (
-                        <span className="text-[#22c55e]">Tour: {roundSum}</span>
-                      ) : (
-                        <span className="text-zinc-600">Tour: -</span>
-                      )}
-                      <span className="text-zinc-600">|</span>
-                      <span className="text-zinc-500">Préc: <span className="text-zinc-300">{player.lastRoundScore !== undefined && player.lastRoundScore > 0 ? player.lastRoundScore : '-'}</span></span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Ligne 2 : Statistiques en 1 ligne horizontale ultra-compacte */}
-                <div className="flex flex-wrap justify-between items-center text-xs sm:text-sm text-zinc-400 mt-2 pt-1 border-t border-zinc-900/40 font-bold gap-x-2 gap-y-0.5">
-                  <span>Moy: <strong className="text-white">{formattedAvg}</strong></span>
-                  <span>Dernier: <strong className="text-[#22c55e]">{player.lastRoundScore !== undefined && player.lastRoundScore > 0 ? player.lastRoundScore : '-'}</strong></span>
-                  <span>Meil: <strong className="text-yellow-500">{player.bestRound !== undefined && player.bestRound > 0 ? player.bestRound : '-'}</strong></span>
-                  <span>Lancers: <strong className="text-zinc-300">{player.throwsCount}</strong></span>
-                </div>
-              </div>
-            );
-          }
-
-          // --- RENDU EN GRILLE (4 JOUEURS ET PLUS) ---
+          // --- RENDU PLEINE LARGEUR (POUR TOUS LES JOUEURS) ---
           return (
             <div 
               key={player.name} 
               data-active-player={isActive ? "true" : "false"}
               className={`relative flex flex-col transition-all border ${cardPaddingClass} ${
                 isActive 
-                  ? 'active-player-card bg-zinc-900/95 border-[#22c55e] shadow-[0_0_12px_rgba(34,197,94,0.15)] ring-1 ring-[#22c55e]/25' 
+                  ? 'active-player-card bg-zinc-900/95 border-[#22c55e] shadow-[0_0_15px_rgba(34,197,94,0.15)] ring-1 ring-[#22c55e]/25' 
                   : player.roundBust
                     ? 'bg-[#1a0f0f] border-red-500/30 opacity-90'
                     : 'bg-zinc-950 border-zinc-900/60 opacity-80'
-              } ${isLastOddPlayer ? 'col-span-2' : ''}`}
+              }`}
             >
-              {/* Ligne 1 : Nom, 3 cases fléchettes, et Score géant */}
-              <div className="flex items-start justify-between gap-2">
-                {/* Nom, Statut & Cases (gauche) */}
+              {/* Ligne 1 : Infos principales (Gauche: nom, fléchettes. Droite: score) */}
+              <div className="flex items-center justify-between gap-2">
+                {/* Gauche : Nom, Statut, Finition, Volée */}
                 <div className="flex flex-col justify-center min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className={`${nameSizeClass} tracking-wide uppercase truncate flex items-center gap-1.5 ${
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`${nameSizeClass} tracking-wide uppercase truncate flex items-center gap-2 ${
                       isActive ? 'text-[#22c55e]' : 'text-zinc-300'
                     }`}>
                       <span className="truncate">{player.name}</span>
-                      <span className="text-base flex-shrink-0">{player.emoji || '🎯'}</span>
+                      <span className="text-xl sm:text-2xl flex-shrink-0">{player.emoji || '🎯'}</span>
                     </span>
                     {isActive && (
-                      <span className="flex-shrink-0 flex items-center justify-center w-2 h-2 rounded-full bg-[#22c55e] animate-pulse" />
+                      <span className="flex-shrink-0 flex items-center justify-center w-2.5 h-2.5 rounded-full bg-[#22c55e] animate-pulse" />
                     )}
                     {player.roundBust && (
-                      <span className="flex-shrink-0 text-[8px] bg-red-600/95 text-white font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">
+                      <span className="flex-shrink-0 text-[10px] sm:text-xs bg-red-600/95 text-white font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">
                         Bust
                       </span>
                     )}
                   </div>
-                  <span className="text-[10px] sm:text-xs text-zinc-500 font-semibold mt-0.5 truncate">
-                    {isActive ? `${player.dartsLeft} fléchettes` : 'En attente'}
-                  </span>
+                  
+                  {/* Statut et Finition intégrée */}
+                  <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                    <span className="text-xs sm:text-sm text-zinc-500 font-bold truncate">
+                      {isActive ? `En cours — ${player.dartsLeft} flèche(s)` : 'En attente'}
+                    </span>
+                    {isActive && currentRoom?.gameType === 'x01' && player.score <= 180 && player.score > 1 && (
+                      <span className="text-[10px] sm:text-xs text-[#22c55e] font-black tracking-widest bg-[#22c55e]/10 border border-[#22c55e]/20 px-2 py-0.5 rounded shadow-sm">
+                        {getCheckoutSuggestion(player.score, !!currentRoom.doubleOut)?.join(' › ')}
+                      </span>
+                    )}
+                  </div>
 
-                  {/* Volée en cours : Les 3 carrés (gauche, sous le nom) */}
+                  {/* Volée en cours (les 3 carrés) intégrée sous le nom au lieu d'être absolue */}
                   {(isActive || roundSum > 0 || roundThrows.length > 0 || player.roundBust) && (
-                    <div className="flex items-center gap-1 mt-2">
+                    <div className="flex items-center gap-1.5 mt-2">
                       {player.roundBust ? (
-                        <span className="text-[9px] text-red-500 font-black tracking-widest animate-pulse">
+                        <span className="text-sm sm:text-base text-red-500 font-black tracking-widest animate-pulse h-10 flex items-center">
                           BUST ❌
                         </span>
                       ) : (
-                        <div className="flex gap-1">
+                        <>
                           {[dart1, dart2, dart3].map((dart, dIdx) => {
                             const isBustDart = player.roundBust && dart && dIdx === roundThrows.length - 1;
                             return (
                               <div 
                                 key={dIdx} 
-                                className={`w-12 h-10 sm:w-14 sm:h-12 rounded-lg border flex items-center justify-center text-sm sm:text-base font-black transition-all duration-300 ${
+                                className={`w-12 h-10 sm:w-16 sm:h-12 rounded-lg border-2 flex items-center justify-center text-lg sm:text-xl font-black transition-all duration-300 shadow-md ${
                                   isBustDart
-                                    ? 'border-red-500/60 bg-red-950/20 text-red-400 shadow-[0_0_8px_rgba(239,68,68,0.3)]'
+                                    ? 'border-red-500/60 bg-red-950/20 text-red-400'
                                     : dart 
                                       ? 'border-zinc-700 text-white bg-zinc-900' 
                                       : 'border-zinc-900 text-transparent bg-black/40'
@@ -468,44 +353,41 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                               </div>
                             );
                           })}
-                        </div>
+                        </>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* Score géant & Points (droite) */}
-                <div className="flex flex-col items-end flex-shrink-0 ml-1">
+                {/* Droite : Score géant + Points du tour */}
+                <div className="flex flex-col items-end flex-shrink-0 ml-2">
                   <span className={`tracking-tighter leading-none ${
                     player.roundBust 
                       ? 'text-red-400/90' 
                       : isActive 
-                        ? 'text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.15)]' 
+                        ? 'text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.15)]' 
                         : 'text-zinc-400'
                   } ${scoreSizeClass}`}>
                     {player.score}
                   </span>
-                  
-                  {/* Points du tour en cours et dernier tour */}
-                  {(isActive || roundSum > 0 || roundThrows.length > 0 || player.roundBust) && (
-                    <div className="flex items-center gap-1.5 mt-2 font-bold text-[12px] sm:text-sm uppercase tracking-wider">
-                      {(roundSum > 0 || roundThrows.length > 0) ? (
-                        <span className="text-[#22c55e]">Tour: {roundSum}</span>
-                      ) : (
-                        <span className="text-zinc-600">Tour: -</span>
-                      )}
-                      <span className="text-zinc-600">|</span>
-                      <span className="text-zinc-500">Préc: <span className="text-zinc-300">{player.lastRoundScore !== undefined && player.lastRoundScore > 0 ? player.lastRoundScore : '-'}</span></span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1 mt-1 font-bold text-[13px] sm:text-sm uppercase tracking-wider">
+                    {(roundSum > 0 || roundThrows.length > 0) ? (
+                      <span className="text-[#22c55e]">Tour: {roundSum}</span>
+                    ) : (
+                      <span className="text-zinc-600">Tour: -</span>
+                    )}
+                    <span className="text-zinc-600">|</span>
+                    <span className="text-zinc-500">Préc: <span className="text-zinc-300">{player.lastRoundScore !== undefined && player.lastRoundScore > 0 ? player.lastRoundScore : '-'}</span></span>
+                  </div>
                 </div>
               </div>
 
               {/* Ligne 2 : Statistiques en 1 ligne horizontale ultra-compacte */}
-              <div className="flex flex-wrap justify-between items-center text-[12px] sm:text-sm text-zinc-400 mt-2 pt-2 border-t border-zinc-900/40 px-0.5 font-bold gap-x-1 gap-y-1">
-                <span>Moy: <span className="text-white">{formattedAvg}</span></span>
-                <span>Dernier: <span className="text-[#22c55e]">{player.lastRoundScore !== undefined && player.lastRoundScore > 0 ? player.lastRoundScore : '-'}</span></span>
-                <span>Lancers: <span className="text-zinc-300">{player.throwsCount}</span></span>
+              <div className="flex flex-wrap justify-between items-center text-xs sm:text-sm text-zinc-400 mt-2 pt-1 border-t border-zinc-900/40 font-bold gap-x-2 gap-y-0.5">
+                <span>Moy: <strong className="text-white">{formattedAvg}</strong></span>
+                <span>Dernier: <strong className="text-[#22c55e]">{player.lastRoundScore !== undefined && player.lastRoundScore > 0 ? player.lastRoundScore : '-'}</strong></span>
+                <span>Meil: <strong className="text-yellow-500">{player.bestRound !== undefined && player.bestRound > 0 ? player.bestRound : '-'}</strong></span>
+                <span>Lancers: <strong className="text-zinc-300">{player.throwsCount}</strong></span>
               </div>
             </div>
           );
