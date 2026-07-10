@@ -185,27 +185,33 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
   return (
     <div className="remote-view-container h-svh bg-black text-white flex flex-col justify-between relative overflow-hidden select-none font-sans">
       
-      {/* En-tête X01 avec retour vert et boutons utilitaires verts */}
-      <header className="p-3 bg-black flex items-center justify-between border-b border-zinc-800 z-10">
-        <div className="flex items-center gap-3">
+      {/* En-tête X01 compact */}
+      <header className="py-1.5 px-3 bg-black flex items-center justify-between border-b border-zinc-800 z-10">
+        <div className="flex items-center gap-2">
           <button 
             onClick={() => setShowExitModal(true)} 
-            className="min-w-[48px] min-h-[48px] flex items-center justify-center text-[#22c55e] hover:text-[#4ade80] transition-colors cursor-pointer focus:outline-none"
+            className="w-10 h-10 flex items-center justify-center text-[#22c55e] hover:text-[#4ade80] transition-colors cursor-pointer focus:outline-none"
           >
             <ArrowLeft className="w-6 h-6 stroke-[2.5]" />
           </button>
-          <h1 className="text-xl font-bold tracking-tight text-white">X01</h1>
+          <div className="flex flex-col">
+            <h1 className="text-xl font-bold tracking-tight text-white leading-tight">X01</h1>
+            <div className="text-[10px] text-zinc-400 font-medium tracking-wide flex items-center gap-1.5">
+              <span>{currentRoom?.targetScore}, {currentRoom?.doubleOut ? 'Double Out' : 'Normal'}</span>
+              <span className="text-zinc-600">•</span>
+              <span className="text-[#22c55e]">Salon {currentRoom?.roomId}</span>
+            </div>
+          </div>
         </div>
         
-        <div className="flex items-center gap-4 text-[#22c55e]">
+        <div className="flex items-center gap-2 text-[#22c55e]">
           {!isLocalMode && (
             <button
-              className="flex items-center justify-center min-w-[48px] min-h-[48px] gap-1 px-2 rounded-lg bg-[#22c55e]/10 border border-[#22c55e]/30 hover:border-[#22c55e] hover:bg-[#22c55e]/20 transition-all cursor-pointer"
+              className="flex items-center justify-center w-10 h-10 gap-1 rounded-lg bg-[#22c55e]/10 border border-[#22c55e]/30 hover:border-[#22c55e] hover:bg-[#22c55e]/20 transition-all cursor-pointer"
               title="Synchroniser le Visualisateur"
               onClick={() => setShowProjectionModal(true)}
             >
               <Tv className="w-5 h-5 stroke-[2.5] text-[#22c55e]" />
-              <span className="text-[10px] font-black text-[#22c55e] uppercase tracking-wider hidden sm:inline">Sync</span>
             </button>
           )}
           {/* Bouton ⚙️ Paramètres Projecteur */}
@@ -217,9 +223,9 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
               localStorage.setItem('minou_dart_is_calibrating', 'false');
             }}
             title="Paramètres du projecteur"
-            className="flex items-center justify-center min-w-[48px] min-h-[48px] bg-zinc-900/80 border border-zinc-700/50 hover:border-[#22c55e]/60 hover:bg-zinc-800 text-zinc-500 hover:text-[#22c55e] rounded-lg transition-all cursor-pointer"
+            className="flex items-center justify-center w-10 h-10 bg-zinc-900/80 border border-zinc-700/50 hover:border-[#22c55e]/60 hover:bg-zinc-800 text-zinc-500 hover:text-[#22c55e] rounded-lg transition-all cursor-pointer"
           >
-            <Settings className="w-6 h-6" />
+            <Settings className="w-5 h-5" />
           </button>
         </div>
       </header>
@@ -230,12 +236,6 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
           {error}
         </div>
       )}
-
-      {/* Bandeau de description du mode de jeu (ex: 301, Double Out...) avec le salon intégré */}
-      <div className="bg-[#121212] py-1.5 px-4 border-b border-zinc-900 text-xs text-zinc-400 font-medium tracking-wide flex justify-between items-center">
-        <span>{currentRoom?.targetScore}, {currentRoom?.doubleOut ? 'Double Out' : 'Normal'}, First to 1 Set 1 Leg</span>
-        <span className="text-[10px] text-zinc-500 font-bold bg-zinc-900/60 px-2 py-0.5 rounded border border-zinc-850/50">Salon {currentRoom?.roomId}</span>
-      </div>
 
       {/* Liste des joueurs adaptative (grille ou flex) - avec min-h-0 pour forcer le rétrécissement flexbox */}
       <div 
@@ -306,62 +306,73 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                       : 'bg-zinc-950 border-zinc-900/60 opacity-80'
                 }`}
               >
-                {/* Ligne 1 : Nom, 3 cases fléchettes, et Score géant */}
-                <div className="flex items-start justify-between gap-4">
-                  {/* Nom & Statut (gauche) */}
+                {/* Ligne 1 : Infos principales (Gauche: nom, fléchettes. Droite: score) */}
+                <div className="flex items-center justify-between gap-2">
+                  {/* Gauche : Nom, Statut, Finition, Volée */}
                   <div className="flex flex-col justify-center min-w-0 flex-1">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`${nameSizeClass} tracking-wide uppercase truncate flex items-center gap-2 ${
                         isActive ? 'text-[#22c55e]' : 'text-zinc-300'
                       }`}>
                         <span className="truncate">{player.name}</span>
-                        <span className="text-2xl flex-shrink-0">{player.emoji || '🎯'}</span>
+                        <span className="text-xl sm:text-2xl flex-shrink-0">{player.emoji || '🎯'}</span>
                       </span>
                       {isActive && (
-                        <span className="flex-shrink-0 flex items-center justify-center w-3 h-3 rounded-full bg-[#22c55e] animate-pulse" />
+                        <span className="flex-shrink-0 flex items-center justify-center w-2.5 h-2.5 rounded-full bg-[#22c55e] animate-pulse" />
                       )}
                       {player.roundBust && (
-                        <span className="flex-shrink-0 text-[10px] sm:text-xs bg-red-600/95 text-white font-extrabold px-2 py-1 rounded-md uppercase tracking-wider animate-pulse">
+                        <span className="flex-shrink-0 text-[10px] sm:text-xs bg-red-600/95 text-white font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">
                           Bust
                         </span>
                       )}
                     </div>
-                    <span className="text-xs sm:text-sm text-zinc-500 font-bold mt-0.5 truncate">
-                      {isActive ? `En cours — ${player.dartsLeft} fléchette(s)` : 'En attente'}
-                    </span>
-                  </div>
-
-                  {/* Volée en cours : Les 3 carrés (flottants en haut à droite, au-dessus de TOUR) */}
-                  <div className="absolute top-3 right-[130px] sm:right-[160px] flex gap-1.5 z-10">
-                    {player.roundBust ? (
-                      <span className="text-sm sm:text-base text-red-500 font-black tracking-widest animate-pulse h-[60px] flex items-center">
-                        BUST ❌
+                    
+                    {/* Statut et Finition intégrée */}
+                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                      <span className="text-xs sm:text-sm text-zinc-500 font-bold truncate">
+                        {isActive ? `En cours — ${player.dartsLeft} flèche(s)` : 'En attente'}
                       </span>
-                    ) : (
-                      <>
-                        {[dart1, dart2, dart3].map((dart, dIdx) => {
-                          const isBustDart = player.roundBust && dart && dIdx === roundThrows.length - 1;
-                          return (
-                            <div 
-                              key={dIdx} 
-                              className={`w-[64px] h-[52px] sm:w-[76px] sm:h-[64px] rounded-xl border-2 flex items-center justify-center text-xl sm:text-2xl font-black transition-all duration-300 shadow-md ${
-                                isBustDart
-                                  ? 'border-red-500/60 bg-red-950/20 text-red-400 shadow-[0_0_8px_rgba(239,68,68,0.3)]'
-                                  : dart 
-                                    ? 'border-zinc-700 text-white bg-zinc-900' 
-                                    : 'border-zinc-900 text-transparent bg-black/40'
-                              }`}
-                            >
-                              {dart}
-                            </div>
-                          );
-                        })}
-                      </>
+                      {isActive && currentRoom?.gameType === 'x01' && player.score <= 180 && player.score > 1 && (
+                        <span className="text-[10px] sm:text-xs text-[#22c55e] font-black tracking-widest bg-[#22c55e]/10 border border-[#22c55e]/20 px-2 py-0.5 rounded shadow-sm">
+                          {getCheckoutSuggestion(player.score, !!currentRoom.doubleOut)?.join(' › ')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Volée en cours (les 3 carrés) intégrée sous le nom au lieu d'être absolue */}
+                    {(isActive || roundSum > 0 || roundThrows.length > 0 || player.roundBust) && (
+                      <div className="flex items-center gap-1.5 mt-2">
+                        {player.roundBust ? (
+                          <span className="text-sm sm:text-base text-red-500 font-black tracking-widest animate-pulse h-10 flex items-center">
+                            BUST ❌
+                          </span>
+                        ) : (
+                          <>
+                            {[dart1, dart2, dart3].map((dart, dIdx) => {
+                              const isBustDart = player.roundBust && dart && dIdx === roundThrows.length - 1;
+                              return (
+                                <div 
+                                  key={dIdx} 
+                                  className={`w-12 h-10 sm:w-16 sm:h-12 rounded-lg border-2 flex items-center justify-center text-lg sm:text-xl font-black transition-all duration-300 shadow-md ${
+                                    isBustDart
+                                      ? 'border-red-500/60 bg-red-950/20 text-red-400'
+                                      : dart 
+                                        ? 'border-zinc-700 text-white bg-zinc-900' 
+                                        : 'border-zinc-900 text-transparent bg-black/40'
+                                  }`}
+                                >
+                                  {dart}
+                                </div>
+                              );
+                            })}
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
 
-                  {/* Score restant géant (droite) + Points de volées sous le score */}
-                  <div className="flex flex-col items-end flex-shrink-0 z-0">
+                  {/* Droite : Score géant + Points du tour */}
+                  <div className="flex flex-col items-end flex-shrink-0 ml-2">
                     <span className={`tracking-tighter leading-none ${
                       player.roundBust 
                         ? 'text-red-400/90' 
@@ -371,7 +382,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                     } ${scoreSizeClass}`}>
                       {player.score}
                     </span>
-                    <div className="flex items-center gap-2 mt-0 font-bold text-[14px] sm:text-base uppercase tracking-wider relative z-0">
+                    <div className="flex items-center gap-1 mt-1 font-bold text-[13px] sm:text-sm uppercase tracking-wider">
                       {(roundSum > 0 || roundThrows.length > 0) ? (
                         <span className="text-[#22c55e]">Tour: {roundSum}</span>
                       ) : (
@@ -384,7 +395,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                 </div>
 
                 {/* Ligne 2 : Statistiques en 1 ligne horizontale ultra-compacte */}
-                <div className="flex flex-wrap justify-between items-center text-base sm:text-lg text-zinc-400 mt-1 pt-1 border-t border-zinc-900/40 px-2 font-bold gap-x-2 gap-y-0.5">
+                <div className="flex flex-wrap justify-between items-center text-xs sm:text-sm text-zinc-400 mt-2 pt-1 border-t border-zinc-900/40 font-bold gap-x-2 gap-y-0.5">
                   <span>Moy: <strong className="text-white">{formattedAvg}</strong></span>
                   <span>Dernier: <strong className="text-[#22c55e]">{player.lastRoundScore !== undefined && player.lastRoundScore > 0 ? player.lastRoundScore : '-'}</strong></span>
                   <span>Meil: <strong className="text-yellow-500">{player.bestRound !== undefined && player.bestRound > 0 ? player.bestRound : '-'}</strong></span>
@@ -513,87 +524,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
           </div>
         )}
 
-        {/* === HEADER UNIFIÉ : Finition + Sélecteur compact === */}
-        <div className="w-full max-w-lg mx-auto flex items-center justify-between gap-2 mb-0.5">
-
-          {/* Suggestion de finition X01 (à gauche, si disponible) */}
-          {currentRoom?.gameType === 'x01' && (() => {
-            const activePlayer = players[activePlayerIndex];
-            if (!activePlayer || activePlayer.score > 180 || activePlayer.score <= 1) return (
-              <div className="flex-1" />
-            );
-            const suggestion = getCheckoutSuggestion(activePlayer.score, !!currentRoom.doubleOut);
-            if (!suggestion || suggestion.length === 0) return (
-              <div className="flex-1" />
-            );
-
-            const renderCheckoutDartBadge = (dart: string) => {
-              let bgClass = 'bg-zinc-800 text-zinc-200 border-zinc-700';
-              let display = dart;
-              if (dart.startsWith('T')) {
-                bgClass = 'bg-red-600/90 text-white border-red-500 shadow-sm shadow-red-900/30';
-                display = `T${dart.substring(1)}`;
-              } else if (dart.startsWith('D')) {
-                bgClass = 'bg-yellow-500 text-black border-yellow-400 font-extrabold shadow-sm shadow-yellow-900/20';
-                display = `D${dart.substring(1)}`;
-              } else if (dart.startsWith('S')) {
-                bgClass = 'bg-zinc-800 text-zinc-300 border-zinc-750';
-                display = `S${dart.substring(1)}`;
-              } else if (dart === 'BULL') {
-                bgClass = 'bg-red-600 text-white border-red-500 shadow-sm shadow-red-900/40 font-extrabold';
-                display = 'BULL';
-              }
-              return (
-                <span key={dart} className={`px-2.5 py-1 rounded-md border text-[11px] sm:text-xs font-black uppercase tracking-wider ${bgClass}`}>
-                  {display}
-                </span>
-              );
-            };
-
-            return (
-              <div className="flex-1 px-3 py-2 bg-gradient-to-r from-[#22c55e]/15 to-transparent border-l-2 border-[#22c55e] rounded-r-xl flex items-center gap-2 overflow-hidden shadow-inner min-h-[48px]">
-                <Target className="w-4 h-4 text-[#22c55e] flex-shrink-0" />
-                <span className="text-[11px] sm:text-xs text-zinc-300 font-extrabold tracking-widest uppercase flex-shrink-0">Finition :</span>
-                <div className="flex items-center gap-1.5 overflow-hidden">
-                  {suggestion.map((dart, idx) => (
-                    <React.Fragment key={idx}>
-                      {idx > 0 && <span className="text-zinc-500 text-xs font-black flex-shrink-0">›</span>}
-                      {renderCheckoutDartBadge(dart)}
-                    </React.Fragment>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Sélecteur compact de clavier (icône capsule, à droite) */}
-          <div className="flex-shrink-0 bg-black/50 p-0.5 rounded-xl border border-zinc-800/80 flex gap-0.5 shadow-inner">
-            <button
-              onClick={() => handleX01InputMethodChange('keyboard')}
-              title="Saisie par chiffres"
-              className={`p-2 rounded-lg transition-all flex items-center justify-center cursor-pointer select-none touch-manipulation ${
-                x01InputMethod === 'keyboard'
-                  ? 'bg-[#22c55e] text-black shadow'
-                  : 'text-zinc-500 hover:text-white'
-              }`}
-            >
-              <Smartphone className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => handleX01InputMethodChange('target')}
-              title="Saisie par cible"
-              className={`p-2 rounded-lg transition-all flex items-center justify-center cursor-pointer select-none touch-manipulation ${
-                x01InputMethod === 'target'
-                  ? 'bg-[#22c55e] text-black shadow'
-                  : 'text-zinc-500 hover:text-white'
-              }`}
-            >
-              <Target className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* === FLÉCHETTES EN COURS (3 badges) === */}
+        {/* === LIGNE D'ACTIONS UNIFIÉE (3 FLÉCHETTES + RETOUR) === */}
         {currentRoom?.gameType === 'x01' && (() => {
           const activePlayer = players[activePlayerIndex];
           if (!activePlayer) return null;
@@ -601,7 +532,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
           const dartCount = 3 - (activePlayer.dartsLeft ?? 3);
 
           return (
-            <div className="w-full max-w-lg mx-auto flex items-center justify-center gap-2 py-1">
+            <div className="w-full max-w-lg mx-auto flex items-center justify-center gap-1.5 py-1 px-1">
               {[0, 1, 2].map((i) => {
                 const dartLabel = throws[i] ?? '';
                 const isActive = i === dartCount;
@@ -611,37 +542,64 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                   </div>
                 );
               })}
+              <button
+                onClick={handleUndo}
+                disabled={isSubmitting}
+                className="w-16 sm:w-20 min-h-[44px] bg-[#dc2626] hover:bg-red-500 active:scale-95 text-white font-extrabold rounded-xl text-xs flex flex-col items-center justify-center transition-all cursor-pointer disabled:opacity-40 select-none touch-manipulation gap-0.5 shadow-md"
+                title="Corriger le dernier lancer"
+              >
+                <ArrowLeft className="w-4 h-4 stroke-[3.5]" />
+                <span>Retour</span>
+              </button>
             </div>
           );
         })()}
 
-        {/* === LIGNE D'ACTIONS UNIFIÉE (Loupé + Retour) === */}
-        <div className="grid grid-cols-7 gap-1.5 w-full max-w-lg mx-auto px-1">
-          <button
-            onClick={() => handleThrowDirect(0)}
-            disabled={isSubmitting}
-            className="col-span-5 min-h-[48px] bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-white border-2 border-red-500 font-extrabold py-2.5 rounded-xl text-sm transition-all cursor-pointer disabled:opacity-40 select-none touch-manipulation uppercase tracking-wider flex items-center justify-center gap-2"
-          >
-            <svg className="w-5 h-5 text-red-500 stroke-[3]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            Loupé
-          </button>
-          <button
-            onClick={handleUndo}
-            disabled={isSubmitting}
-            className="col-span-2 min-h-[48px] bg-[#dc2626] hover:bg-red-500 active:scale-95 text-white font-extrabold py-2.5 rounded-xl text-sm flex items-center justify-center transition-all cursor-pointer disabled:opacity-40 select-none touch-manipulation gap-1.5"
-            title="Corriger le dernier lancer"
-          >
-            <ArrowLeft className="w-5 h-5 stroke-[3.5]" />
-            Retour
-          </button>
-        </div>
-
         {/* === CLAVIER CONDITIONNEL (Cible ou Chiffres) === */}
         {x01InputMethod === 'target' ? (
-          /* CIBLE INTERACTIVE SVG DÉFORMÉE */
-          <div className="w-full max-w-lg mx-auto animate-fadeIn">
+          /* CIBLE INTERACTIVE SVG DÉFORMÉE + COINS (Loupé & Sélecteur) */
+          <div className="w-full max-w-lg mx-auto animate-fadeIn relative">
+            
+            {/* Les 4 coins d'actions autour de la cible */}
+            <button
+              onClick={() => handleX01InputMethodChange('keyboard')}
+              className="absolute top-0 left-1 w-14 h-14 bg-zinc-900/90 border border-zinc-700 rounded-xl flex flex-col items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors z-10 shadow-md"
+              title="Passer au clavier"
+            >
+              <Smartphone className="w-5 h-5 mb-0.5" />
+              <span className="text-[8px] font-bold uppercase tracking-widest">Clavier</span>
+            </button>
+
+            <button
+              onClick={() => handleThrowDirect(0)}
+              disabled={isSubmitting}
+              className="absolute top-0 right-1 w-14 h-14 bg-zinc-900/90 border border-zinc-700 hover:border-red-500 rounded-xl flex flex-col items-center justify-center text-red-500/80 hover:text-red-400 hover:bg-zinc-800 transition-colors z-10 font-bold shadow-md"
+              title="Loupé"
+            >
+              <svg className="w-5 h-5 stroke-[3] mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              <span className="text-[8px] uppercase tracking-widest">Loupé</span>
+            </button>
+
+            <button
+              onClick={() => handleThrowDirect(0)}
+              disabled={isSubmitting}
+              className="absolute bottom-1 left-1 w-14 h-14 bg-zinc-900/90 border border-zinc-700 hover:border-red-500 rounded-xl flex flex-col items-center justify-center text-red-500/80 hover:text-red-400 hover:bg-zinc-800 transition-colors z-10 font-bold shadow-md"
+              title="Loupé"
+            >
+              <svg className="w-5 h-5 stroke-[3] mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              <span className="text-[8px] uppercase tracking-widest">Loupé</span>
+            </button>
+
+            <button
+              onClick={() => handleThrowDirect(0)}
+              disabled={isSubmitting}
+              className="absolute bottom-1 right-1 w-14 h-14 bg-zinc-900/90 border border-zinc-700 hover:border-red-500 rounded-xl flex flex-col items-center justify-center text-red-500/80 hover:text-red-400 hover:bg-zinc-800 transition-colors z-10 font-bold shadow-md"
+              title="Loupé"
+            >
+              <svg className="w-5 h-5 stroke-[3] mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              <span className="text-[8px] uppercase tracking-widest">Loupé</span>
+            </button>
+
             {(() => {
               const centerX = 200;
               const centerY = 200;
@@ -767,6 +725,30 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
         ) : (
           /* PAVÉ NUMÉRIQUE CLASSIQUE */
           <div className="flex flex-col gap-2 w-full max-w-lg mx-auto animate-fadeIn">
+            
+            {/* Ligne d'actions spécifique au clavier : Sélecteur Cible + Grand Loupé */}
+            <div className="flex items-center gap-1.5 w-full px-1">
+              <button
+                onClick={() => handleX01InputMethodChange('target')}
+                className="w-16 sm:w-20 min-h-[48px] bg-zinc-900 border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800 flex flex-col items-center justify-center rounded-xl transition-all shadow-inner cursor-pointer"
+                title="Passer à la cible"
+              >
+                <Target className="w-5 h-5 mb-0.5" />
+                <span className="text-[9px] font-bold uppercase tracking-widest">Cible</span>
+              </button>
+
+              <button
+                onClick={() => handleThrowDirect(0)}
+                disabled={isSubmitting}
+                className="flex-1 min-h-[48px] bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-white border-2 border-red-500 font-extrabold rounded-xl text-sm transition-all cursor-pointer disabled:opacity-40 select-none touch-manipulation uppercase tracking-wider flex items-center justify-center gap-2 shadow-md"
+              >
+                <svg className="w-5 h-5 text-red-500 stroke-[3]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Loupé
+              </button>
+            </div>
+
             {/* Ligne 1 : Multiplicateurs (DOUBLE, TRIPLE) */}
             <div className="grid grid-cols-2 gap-2 w-full px-1">
               <button
@@ -779,6 +761,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
               >
                 DOUBLE
               </button>
+
               <button
                 onClick={() => setMultiplier(multiplier === 'T' ? 'S' : 'T')}
                 className={`text-white font-extrabold py-3 rounded-xl text-xs tracking-wider transition-all cursor-pointer select-none touch-manipulation ${
