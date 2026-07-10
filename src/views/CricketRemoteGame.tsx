@@ -209,7 +209,7 @@ export const CricketRemoteGame: React.FC<CricketRemoteGameProps> = ({
                         <button
                           onClick={() => handleCricketThrow(target)}
                           disabled={isSubmitting || allClosed || isTripleBullForbidden}
-                          className={`w-full py-2 px-1 rounded-xl font-black text-lg text-center cursor-pointer transition-all active:scale-95 disabled:opacity-50 relative overflow-hidden ${targetBgClass}`}
+                          className={`w-full py-4 px-1 rounded-xl font-black text-lg text-center cursor-pointer transition-all active:scale-95 disabled:opacity-50 relative overflow-hidden ${targetBgClass}`}
                         >
                           {targetLabel}
                           {allClosed && (

@@ -289,8 +289,8 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
             ? 'text-sm sm:text-base font-extrabold'
             : 'text-xl sm:text-2xl font-extrabold';
           const cardPaddingClass = isGrid
-            ? 'p-3 rounded-2xl'
-            : 'p-4 sm:p-5 rounded-3xl';
+            ? 'p-2 rounded-xl'
+            : 'p-2 sm:p-3 rounded-2xl';
 
           // --- RENDU PLEINE LARGEUR (1 À 3 JOUEURS) ---
           if (!isGrid) {
@@ -326,7 +326,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                         </span>
                       )}
                     </div>
-                    <span className="text-xs sm:text-sm text-zinc-500 font-bold mt-1.5 truncate">
+                    <span className="text-xs sm:text-sm text-zinc-500 font-bold mt-0.5 truncate">
                       {isActive ? `En cours — ${player.dartsLeft} fléchette(s)` : 'En attente'}
                     </span>
                   </div>
@@ -371,7 +371,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                     } ${scoreSizeClass}`}>
                       {player.score}
                     </span>
-                    <div className="flex items-center gap-2 mt-2 font-bold text-[14px] sm:text-base uppercase tracking-wider relative z-0">
+                    <div className="flex items-center gap-2 mt-0 font-bold text-[14px] sm:text-base uppercase tracking-wider relative z-0">
                       {(roundSum > 0 || roundThrows.length > 0) ? (
                         <span className="text-[#22c55e]">Tour: {roundSum}</span>
                       ) : (
@@ -384,7 +384,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                 </div>
 
                 {/* Ligne 2 : Statistiques en 1 ligne horizontale ultra-compacte */}
-                <div className="flex flex-wrap justify-between items-center text-base sm:text-lg text-zinc-400 mt-4 pt-3 border-t-2 border-zinc-900/40 px-2 font-bold gap-x-2 gap-y-1">
+                <div className="flex flex-wrap justify-between items-center text-base sm:text-lg text-zinc-400 mt-1 pt-1 border-t border-zinc-900/40 px-2 font-bold gap-x-2 gap-y-0.5">
                   <span>Moy: <strong className="text-white">{formattedAvg}</strong></span>
                   <span>Dernier: <strong className="text-[#22c55e]">{player.lastRoundScore !== undefined && player.lastRoundScore > 0 ? player.lastRoundScore : '-'}</strong></span>
                   <span>Meil: <strong className="text-yellow-500">{player.bestRound !== undefined && player.bestRound > 0 ? player.bestRound : '-'}</strong></span>
