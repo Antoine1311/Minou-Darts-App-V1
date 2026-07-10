@@ -272,13 +272,18 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
                 const centerX = 200;
                 const centerY = 200;
                 const radius = 195;
-                // Rayons modifiés pour déformer la cible (équilibrage des simples, doubles et triples pour une saisie ultra-facile)
+                
                 const rBullInner = radius * (15 / 170);   // Double Bull
                 const rBullOuter = radius * (35 / 170);   // Simple Bull
-                const rTripleInner = radius * (45 / 170); // Triple début (zone interne ultra réduite)
-                const rTripleOuter = radius * (83 / 170); // Triple fin (largeur de 38)
-                const rDoubleInner = radius * (131 / 170);// Double début (largeur simple externe de 48)
-                const rDoubleOuter = radius;              // Double fin
+                
+                // Diviser l'espace restant en 2 zones de même taille
+                const rMiddle = rBullOuter + (radius - rBullOuter) / 2;
+                
+                const rInnerZoneOuter = rMiddle; // Fin de la zone intérieure
+                const rOuterZoneOuter = radius;  // Fin de la zone extérieure
+
+                // Le point de séparation est à environ 60% du rayon total
+                const boundaryPercent = Math.round((rInnerZoneOuter / radius) * 100);
 
                 const segments: React.ReactNode[] = [];
                 const texts: React.ReactNode[] = [];
@@ -288,62 +293,45 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
                   const endAngle = startAngle + segmentAngle;
                   const isEven = index % 2 === 0;
 
-                  const colorSingle = isEven ? '#121214' : '#dec59f';
-                  const colorDoubleTriple = isEven ? '#dc2626' : '#16a34a';
+                  // Couleurs unies sans dégradé
+                  // Intérieur : Bleu foncé (tranches paires) et Bleu clair (tranches impaires)
+                  const colorInner = isEven ? '#0284c7' : '#38bdf8';
+                  // Extérieur : Noir (tranches paires) et Beige (tranches impaires)
+                  const colorOuter = isEven ? '#121214' : '#dec59f';
 
-                  // Single Inner
+                  // Zone Intérieure
                   segments.push(
                     <path
-                      key={`single-inner-${score}`}
-                      d={describeArc(centerX, centerY, rBullOuter, rTripleInner, startAngle, endAngle)}
-                      fill={colorSingle}
+                      key={`inner-${score}`}
+                      d={describeArc(centerX, centerY, rBullOuter, rInnerZoneOuter, startAngle, endAngle)}
+                      fill={colorInner}
                       className="dartboard-segment"
                       onClick={() => handleTargetSelection(score, 'inner')}
                     />
                   );
 
-                  // Triple
+                  // Zone Extérieure
                   segments.push(
                     <path
-                      key={`triple-${score}`}
-                      d={describeArc(centerX, centerY, rTripleInner, rTripleOuter, startAngle, endAngle)}
-                      fill={colorDoubleTriple}
-                      className="dartboard-segment"
-                      onClick={() => handleTargetSelection(score, 'inner')}
-                    />
-                  );
-
-                  // Single Outer
-                  segments.push(
-                    <path
-                      key={`single-outer-${score}`}
-                      d={describeArc(centerX, centerY, rTripleOuter, rDoubleInner, startAngle, endAngle)}
-                      fill={colorSingle}
+                      key={`outer-${score}`}
+                      d={describeArc(centerX, centerY, rInnerZoneOuter, rOuterZoneOuter, startAngle, endAngle)}
+                      fill={colorOuter}
                       className="dartboard-segment"
                       onClick={() => handleTargetSelection(score, 'outer')}
                     />
                   );
 
-                  // Double
-                  segments.push(
-                    <path
-                      key={`double-${score}`}
-                      d={describeArc(centerX, centerY, rDoubleInner, rDoubleOuter, startAngle, endAngle)}
-                      fill={colorDoubleTriple}
-                      className="dartboard-segment"
-                      onClick={() => handleTargetSelection(score, 'outer')}
-                    />
-                  );
-
-                  // Chiffres sur Single Outer
+                  // Chiffres positionnés au milieu de la zone extérieure
                   const angleInDegrees = index * segmentAngle;
-                  const meanRadius = (rTripleOuter + rDoubleInner) / 2;
+                  const meanRadius = (rInnerZoneOuter + rOuterZoneOuter) / 2;
                   const textPos = polarToCartesian(centerX, centerY, meanRadius, angleInDegrees);
                   
                   let textRotation = angleInDegrees;
                   if (angleInDegrees > 90 && angleInDegrees < 270) {
                     textRotation += 180;
                   }
+                  
+                  // Le texte est blanc sur les tranches noires, noir sur les tranches beiges
                   const textColor = isEven ? '#ffffff' : '#000000';
 
                   texts.push(
@@ -353,10 +341,10 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
                       y={textPos.y + 5.5}
                       textAnchor="middle"
                       fill={textColor}
-                      fontSize="16"
+                      fontSize="18"
                       fontWeight="900"
                       transform={`rotate(${textRotation}, ${textPos.x}, ${textPos.y})`}
-                      className="dartboard-text text-[15px] font-black select-none pointer-events-none"
+                      className="dartboard-text font-black select-none pointer-events-none drop-shadow-md"
                     >
                       {score}
                     </text>
@@ -412,15 +400,13 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
                         }
                       `}} />
                       
-                      <circle cx={centerX} cy={centerY} r={rDoubleOuter} fill="none" stroke="#27272a" strokeWidth="1" />
+                      <circle cx={centerX} cy={centerY} r={rOuterZoneOuter} fill="none" stroke="#27272a" strokeWidth="1" />
                       {segments}
                       {texts}
                       
-                      <circle cx={centerX} cy={centerY} r={rBullOuter} fill="none" stroke="#52525b" strokeWidth="0.75" />
-                      <circle cx={centerX} cy={centerY} r={rTripleInner} fill="none" stroke="#52525b" strokeWidth="0.75" />
-                      <circle cx={centerX} cy={centerY} r={rTripleOuter} fill="none" stroke="#52525b" strokeWidth="0.75" />
-                      <circle cx={centerX} cy={centerY} r={rDoubleInner} fill="none" stroke="#52525b" strokeWidth="0.75" />
-                      <circle cx={centerX} cy={centerY} r={rDoubleOuter} fill="none" stroke="#52525b" strokeWidth="1" />
+                      <circle cx={centerX} cy={centerY} r={rBullOuter} fill="none" stroke="#52525b" strokeWidth="1.5" />
+                      <circle cx={centerX} cy={centerY} r={rInnerZoneOuter} fill="none" stroke="#71717a" strokeWidth="2.5" />
+                      <circle cx={centerX} cy={centerY} r={rOuterZoneOuter} fill="none" stroke="#52525b" strokeWidth="1.5" />
                     </svg>
                   </div>
                 );

@@ -144,7 +144,7 @@ export function processCricketThrow(
   }
   
   // Résultat par défaut (lancer non valide ou manqué)
-  let throwResult: CricketThrowResult = {
+  const throwResult: CricketThrowResult = {
     target: baseNumber,
     multiplier,
     marksApplied: 0,
@@ -393,9 +393,9 @@ export function undoCricketThrow(room: RoomData): Partial<RoomData> | null {
     p.bestCricketRound = 0;
   }
   
-  let playerIndices = updatedPlayers.map(() => 0);
+  const playerIndices = updatedPlayers.map(() => 0);
   let activeIdx = 0;
-  let finished = false;
+  const finished = false;
   
   while (!finished) {
     const historyIndex = playerIndices[activeIdx];

@@ -130,6 +130,7 @@ export const ProjectorView: React.FC = () => {
     rDoubleOuter: DEFAULT_RADIUS * STANDARD_RATIOS.rDoubleOuter,
     haloWhiteRadius: DEFAULT_RADIUS * 1.1,
     haloMaxRadius: DEFAULT_RADIUS * 2.5,
+    arShowExtraOverlays: true,
     statsFontSize: 16,
     commentsFontSize: 18,
     statsFontScaleX: 1.0,
@@ -153,6 +154,8 @@ export const ProjectorView: React.FC = () => {
   const [lastCalibrationHit, setLastCalibrationHit] = useState<{ region: string; score: number } | null>(null);
   const [highlightedSegment, setHighlightedSegment] = useState<string | null>(null);
   const [clickToCenterState, setClickToCenterState] = useState<'none' | 'center' | 'radius'>('none');
+  const [pointerPos, setPointerPos] = useState<{ x: number; y: number } | null>(null);
+  const [statsPointerPos, setStatsPointerPos] = useState<{ x: number; y: number } | null>(null);
   const [statsCalibrationState, setStatsCalibrationState] = useState<'none' | 'top-left' | 'bottom-right'>('none');
   const statsStartPointRef = useRef<{ x: number; y: number } | null>(null);
   const [liveStatsRect, setLiveStatsRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -283,6 +286,7 @@ export const ProjectorView: React.FC = () => {
       newCal.centerY = y;
       targetCenterRef.current = { x, y };
       saveCalibration(newCal);
+      setClickToCenterState('radius');
     } else if (clickToCenterState === 'radius') {
       const center = targetCenterRef.current || { x: calibration.centerX, y: calibration.centerY };
       const dx = x - center.x;
@@ -292,12 +296,13 @@ export const ProjectorView: React.FC = () => {
       
       // Verrouiller la taille et terminer la calibration
       setClickToCenterState('none');
+      setPointerPos(null);
       targetCenterRef.current = null;
     }
   };
 
   const handleSvgPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (clickToCenterState !== 'radius') return;
+    if (clickToCenterState === 'none') return;
     
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
@@ -315,35 +320,41 @@ export const ProjectorView: React.FC = () => {
     
     const x = (localX / S) * 1000;
     const y = (localY / S) * 1000;
+    
+    setPointerPos({ x, y });
 
-    const center = targetCenterRef.current || { x: calibration.centerX, y: calibration.centerY };
-    const dx = x - center.x;
-    const dy = y - center.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    adjustCalibrationToRadius(distance);
+    if (clickToCenterState === 'radius') {
+      const center = targetCenterRef.current || { x: calibration.centerX, y: calibration.centerY };
+      const dx = x - center.x;
+      const dy = y - center.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      adjustCalibrationToRadius(distance);
+    }
   };
 
   const handleStatsPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (statsCalibrationState === 'none') return;
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = Math.round(e.clientX - rect.left);
-    const y = Math.round(e.clientY - rect.top);
+    const x = Math.round(e.nativeEvent.offsetX);
+    const y = Math.round(e.nativeEvent.offsetY);
 
     if (statsCalibrationState === 'top-left') {
       statsStartPointRef.current = { x, y };
-      setLiveStatsRect({ x, y, width: 50, height: 50 });
+      setLiveStatsRect({ x, y, width: 0, height: 0 });
       setStatsCalibrationState('bottom-right');
     } else if (statsCalibrationState === 'bottom-right') {
       if (statsStartPointRef.current) {
         const x1 = statsStartPointRef.current.x;
         const y1 = statsStartPointRef.current.y;
-        const width = Math.max(50, x - x1);
-        const height = Math.max(50, y - y1);
+        
+        const finalX = Math.min(x, x1);
+        const finalY = Math.min(y, y1);
+        const width = Math.max(10, Math.abs(x - x1));
+        const height = Math.max(10, Math.abs(y - y1));
 
         const newCal = { ...calibration };
-        newCal.statsPanelX = x1;
-        newCal.statsPanelY = y1;
+        newCal.statsPanelX = finalX;
+        newCal.statsPanelY = finalY;
         newCal.statsPanelWidth = width;
         newCal.statsPanelHeight = height;
         newCal.commentsFontSize = Math.round(Math.max(10, Math.min(40, height * 0.065)));
@@ -353,22 +364,29 @@ export const ProjectorView: React.FC = () => {
       statsStartPointRef.current = null;
       setLiveStatsRect(null);
       setStatsCalibrationState('none');
+      setStatsPointerPos(null);
     }
   };
 
   const handleStatsPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (statsCalibrationState !== 'bottom-right' || !statsStartPointRef.current) return;
+    if (statsCalibrationState === 'none') return;
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = Math.round(e.clientX - rect.left);
-    const y = Math.round(e.clientY - rect.top);
+    const x = Math.round(e.nativeEvent.offsetX);
+    const y = Math.round(e.nativeEvent.offsetY);
 
-    const x1 = statsStartPointRef.current.x;
-    const y1 = statsStartPointRef.current.y;
-    const width = Math.max(50, x - x1);
-    const height = Math.max(50, y - y1);
+    setStatsPointerPos({ x, y });
 
-    setLiveStatsRect({ x: x1, y: y1, width, height });
+    if (statsCalibrationState === 'bottom-right' && statsStartPointRef.current) {
+      const x1 = statsStartPointRef.current.x;
+      const y1 = statsStartPointRef.current.y;
+      
+      const left = Math.min(x, x1);
+      const top = Math.min(y, y1);
+      const width = Math.max(10, Math.abs(x - x1));
+      const height = Math.max(10, Math.abs(y - y1));
+      
+      setLiveStatsRect({ x: left, y: top, width, height });
+    }
   };
 
   const adjustCalibration = (type: 'move-x' | 'move-y' | 'scale-step' | 'stats-move-x' | 'stats-move-y', delta: number) => {
@@ -426,7 +444,34 @@ export const ProjectorView: React.FC = () => {
   const adjustHaloMaxRadius = (delta: number) => {
     const newCal = { ...calibration };
     const minVal = (newCal.haloWhiteRadius ?? (newCal.rDoubleOuter * 1.1)) + 10;
-    newCal.haloMaxRadius = Math.max(minVal, Math.min(1500, (newCal.haloMaxRadius ?? (newCal.rDoubleOuter * 2.5)) + delta));
+    newCal.haloMaxRadius = Math.max(minVal, Math.min(850, (newCal.haloMaxRadius ?? (newCal.rDoubleOuter * 2.5)) + delta));
+    saveCalibration(newCal);
+  };
+
+  const resetTabParameters = (step: number) => {
+    const newCal = { ...calibration };
+    if (step === 1) {
+      newCal.centerX = DEFAULT_CALIBRATION.centerX;
+      newCal.centerY = DEFAULT_CALIBRATION.centerY;
+      newCal.radius = DEFAULT_CALIBRATION.radius;
+      newCal.rDoubleOuter = DEFAULT_CALIBRATION.rDoubleOuter;
+      newCal.rDoubleInner = DEFAULT_CALIBRATION.rDoubleInner;
+      newCal.rTripleOuter = DEFAULT_CALIBRATION.rTripleOuter;
+      newCal.rTripleInner = DEFAULT_CALIBRATION.rTripleInner;
+      newCal.rBullOuter = DEFAULT_CALIBRATION.rBullOuter;
+      newCal.rBullInner = DEFAULT_CALIBRATION.rBullInner;
+      newCal.arShowExtraOverlays = DEFAULT_CALIBRATION.arShowExtraOverlays;
+    } else if (step === 8) {
+      newCal.haloWhiteRadius = DEFAULT_CALIBRATION.haloWhiteRadius;
+      newCal.haloMaxRadius = DEFAULT_CALIBRATION.haloMaxRadius;
+    } else if (step === 9) {
+      newCal.statsPanelX = DEFAULT_CALIBRATION.statsPanelX;
+      newCal.statsPanelY = DEFAULT_CALIBRATION.statsPanelY;
+      newCal.statsPanelWidth = 320;
+      newCal.statsPanelHeight = 280;
+      newCal.statsFontSize = DEFAULT_CALIBRATION.statsFontSize;
+      newCal.commentsFontSize = DEFAULT_CALIBRATION.commentsFontSize;
+    }
     saveCalibration(newCal);
   };
 
@@ -440,7 +485,8 @@ export const ProjectorView: React.FC = () => {
     onChange: (val: number) => void,
     step: number = 1,
     unit: string = '',
-    isHighlight: boolean = false
+    isHighlight: boolean = false,
+    largeStep?: number
   ) => {
     const handleValueChange = (newVal: number) => {
       if (step < 1) {
@@ -460,11 +506,30 @@ export const ProjectorView: React.FC = () => {
           }`}>
             {label}
           </span>
-          <span className={`font-mono font-black ${
-            isHighlight ? 'text-white text-base md:text-lg' : 'text-theme-accent text-sm'
-          }`}>
-            {step < 1 ? value.toFixed(2) : Math.round(value)}{unit}
-          </span>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className={`font-mono font-black ${
+              isHighlight ? 'text-white text-base md:text-lg' : 'text-theme-accent text-sm'
+            }`}>
+              {step < 1 ? value.toFixed(2) : Math.round(value)}{unit}
+              <span className="text-zinc-500 font-normal text-xs ml-1">/ {max}{unit}</span>
+            </span>
+            {largeStep && (
+              <div className="flex items-center gap-1 ml-1">
+                <button
+                  onClick={() => handleValueChange(Math.max(min, value - largeStep))}
+                  className="w-7 h-5 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 flex items-center justify-center font-bold hover:bg-zinc-700 hover:text-white transition-colors cursor-pointer text-[9px]"
+                >
+                  -{largeStep}
+                </button>
+                <button
+                  onClick={() => handleValueChange(Math.min(max, value + largeStep))}
+                  className="w-7 h-5 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 flex items-center justify-center font-bold hover:bg-zinc-700 hover:text-white transition-colors cursor-pointer text-[9px]"
+                >
+                  +{largeStep}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-1 justify-end">
           <button
@@ -497,7 +562,7 @@ export const ProjectorView: React.FC = () => {
     const CALIBRATION_STEPS = [
       { step: 1, label: '🎯 CIBLE', desc: 'Centre & Rayon' },
       { step: 8, label: '🔆 DÉGRADÉ', desc: 'Halos Blanc/Noir' },
-      { step: 9, label: '📊 STATS / POLICES', desc: 'Positions & Tailles' },
+      { step: 9, label: '💬 ZONE COMMENTAIRES', desc: 'Position & Taille' },
     ];
 
     return (
@@ -565,37 +630,62 @@ export const ProjectorView: React.FC = () => {
                   className="w-full py-2.5 px-3 border bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-white rounded-xl flex items-center justify-center gap-2 font-black transition-all cursor-pointer select-none active:scale-95 text-xs"
                 >
                   <Crosshair className="w-4 h-4" />
-                  <span>Choisir le centre sur la cible</span>
+                  <span>Calibrer la Cible (2 clics)</span>
                 </button>
               ) : clickToCenterState === 'center' ? (
                 <div className="space-y-2 w-full animate-fadeIn">
                   <div className="w-full py-2.5 px-3 border bg-yellow-500 border-yellow-400 text-black shadow-[0_0_15px_rgba(234,179,8,0.4)] animate-pulse rounded-xl flex items-center justify-center gap-2 font-black text-xs">
                     <Crosshair className="w-4 h-4 animate-spin-slow" />
-                    <span>Sélection active : cliquez pour placer le centre</span>
+                    <span>1. Cliquez au CENTRE exact de la cible</span>
                   </div>
                   <button
-                    onClick={() => setClickToCenterState('radius')}
-                    className="w-full py-2.5 px-3 bg-green-500 hover:bg-green-450 text-black rounded-xl flex items-center justify-center gap-2 font-black transition-all cursor-pointer select-none active:scale-95 text-xs shadow-md shadow-green-900/10"
+                    onClick={() => { setClickToCenterState('none'); setPointerPos(null); }}
+                    className="w-full py-2 px-3 bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white rounded-xl flex items-center justify-center gap-2 font-bold transition-all cursor-pointer select-none active:scale-95 text-[10px]"
                   >
-                    <Check className="w-4 h-4 stroke-[3px]" />
-                    <span>Verrouiller le centre & Ajuster le cercle extérieur</span>
+                    Annuler
                   </button>
                 </div>
               ) : (
                 <div className="space-y-2 w-full animate-fadeIn">
-                  <div className="w-full py-2.5 px-3 border bg-yellow-500 border-yellow-400 text-black shadow-[0_0_15px_rgba(234,179,8,0.4)] animate-pulse rounded-xl flex items-center justify-center gap-2 font-black text-xs">
+                  <div className="w-full py-2.5 px-3 border bg-orange-500 border-orange-400 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)] animate-pulse rounded-xl flex items-center justify-center gap-2 font-black text-xs">
                     <Crosshair className="w-4 h-4 animate-spin-slow" />
-                    <span>Déplacez le curseur / cliquez pour régler le rayon</span>
+                    <span>2. Écartez le rayon au bord, puis cliquez</span>
                   </div>
                   <button
-                    onClick={() => setClickToCenterState('none')}
-                    className="w-full py-2.5 px-3 bg-green-500 hover:bg-green-450 text-black rounded-xl flex items-center justify-center gap-2 font-black transition-all cursor-pointer select-none active:scale-95 text-xs shadow-md shadow-green-900/10"
+                    onClick={() => { setClickToCenterState('none'); setPointerPos(null); }}
+                    className="w-full py-2 px-3 bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white rounded-xl flex items-center justify-center gap-2 font-bold transition-all cursor-pointer select-none active:scale-95 text-[10px]"
                   >
-                    <Check className="w-4 h-4 stroke-[3px]" />
-                    <span>Valider la cible (OK)</span>
+                    Annuler
                   </button>
                 </div>
               )}
+              {/* Option Afficher Repères AR */}
+              <div className="bg-zinc-900/80 border border-zinc-800/80 rounded-2xl p-2.5 flex items-center justify-between gap-3">
+                <div className="flex flex-col">
+                  <span className="font-black uppercase tracking-wider text-zinc-500 text-[10px]">
+                    Affichage Complémentaire
+                  </span>
+                  <span className="text-zinc-300 text-xs mt-0.5">
+                    Traits et Nombres AR
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    const newCal = { ...calibration };
+                    newCal.arShowExtraOverlays = calibration.arShowExtraOverlays === false ? true : false;
+                    saveCalibration(newCal);
+                  }}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${
+                    calibration.arShowExtraOverlays !== false ? 'bg-theme-accent' : 'bg-zinc-700'
+                  }`}
+                >
+                  <div
+                    className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
+                      calibration.arShowExtraOverlays !== false ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
               {/* Slider Rayon Global */}
               {renderProjectorSliderWithButtons(
                 'Rayon de la cible', 
@@ -626,6 +716,13 @@ export const ProjectorView: React.FC = () => {
                 (val) => adjustCalibration('move-y', val - calibration.centerY),
                 1
               )}
+              <button
+                onClick={() => resetTabParameters(1)}
+                className="w-full mt-2 py-2 border border-red-900/50 bg-red-950/20 text-red-500 hover:bg-red-950/50 hover:text-red-400 rounded-xl flex items-center justify-center gap-2 font-bold transition-all cursor-pointer active:scale-95 text-[10px] uppercase tracking-wider"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Réinitialiser cet onglet
+              </button>
             </div>
           )}
 
@@ -650,7 +747,7 @@ export const ProjectorView: React.FC = () => {
                 'Halo Noir (Dégradé)', 
                 calibration.haloMaxRadius ?? (calibration.rDoubleOuter * 2.5), 
                 Math.round((calibration.haloWhiteRadius ?? (calibration.rDoubleOuter * 1.1)) + 10), 
-                1500, 
+                850, 
                 (val) => {
                   const newCal = { ...calibration };
                   newCal.haloMaxRadius = val;
@@ -660,6 +757,13 @@ export const ProjectorView: React.FC = () => {
                 '',
                 true
               )}
+              <button
+                onClick={() => resetTabParameters(8)}
+                className="w-full mt-2 py-2 border border-red-900/50 bg-red-950/20 text-red-500 hover:bg-red-950/50 hover:text-red-400 rounded-xl flex items-center justify-center gap-2 font-bold transition-all cursor-pointer active:scale-95 text-[10px] uppercase tracking-wider"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Réinitialiser cet onglet
+              </button>
             </div>
           )}
 
@@ -691,9 +795,12 @@ export const ProjectorView: React.FC = () => {
                 'Position X Stats', 
                 calibration.statsPanelX ?? 16, 
                 -500, 
-                1500, 
+                850, 
                 (val) => adjustCalibration('stats-move-x', val - (calibration.statsPanelX ?? 16)),
-                1
+                1,
+                '',
+                false,
+                10
               )}
               {/* Slider Position Y Stats */}
               {renderProjectorSliderWithButtons(
@@ -702,63 +809,44 @@ export const ProjectorView: React.FC = () => {
                 -500, 
                 500, 
                 (val) => adjustCalibration('stats-move-y', val - (calibration.statsPanelY ?? 0)),
-                1
-              )}
-              {/* Slider Taille Police Stats */}
-              {renderProjectorSliderWithButtons(
-                'Police Stats', 
-                calibration.statsFontSize ?? 16, 
-                10, 
-                40, 
-                (val) => {
-                  const newCal = { ...calibration };
-                  newCal.statsFontSize = val;
-                  saveCalibration(newCal);
-                },
                 1,
-                'px'
+                '',
+                false,
+                10
               )}
-              {/* Slider Largeur Police Stats */}
+              {/* Slider Largeur Stats */}
               {renderProjectorSliderWithButtons(
-                'Largeur Stats', 
-                calibration.statsFontScaleX ?? 1.0, 
-                0.5, 
-                2.0, 
+                'Largeur', 
+                calibration.statsPanelWidth ?? 320, 
+                50, 
+                1000, 
                 (val) => {
                   const newCal = { ...calibration };
-                  newCal.statsFontScaleX = val;
+                  newCal.statsPanelWidth = val;
                   saveCalibration(newCal);
                 },
-                0.05,
-                'x'
+                10,
+                '',
+                false,
+                50
               )}
-              {/* Slider Hauteur Police Stats */}
+              {/* Slider Hauteur Stats */}
               {renderProjectorSliderWithButtons(
-                'Hauteur Stats', 
-                calibration.statsFontScaleY ?? 1.0, 
-                0.5, 
-                2.0, 
+                'Hauteur', 
+                calibration.statsPanelHeight ?? 280, 
+                50, 
+                1000, 
                 (val) => {
                   const newCal = { ...calibration };
-                  newCal.statsFontScaleY = val;
+                  newCal.statsPanelHeight = val;
+                  newCal.commentsFontSize = Math.round(Math.max(10, Math.min(40, val * 0.065)));
+                  newCal.statsFontSize = Math.round(Math.max(10, Math.min(40, val * 0.057)));
                   saveCalibration(newCal);
                 },
-                0.05,
-                'x'
-              )}
-              {/* Slider Taille Police Commentaires */}
-              {renderProjectorSliderWithButtons(
-                'Police Commentaires', 
-                calibration.commentsFontSize ?? 18, 
-                10, 
-                40, 
-                (val) => {
-                  const newCal = { ...calibration };
-                  newCal.commentsFontSize = val;
-                  saveCalibration(newCal);
-                },
-                1,
-                'px'
+                10,
+                '',
+                false,
+                50
               )}
 
               {/* Zone de prévisualisation des polices */}
@@ -797,6 +885,13 @@ export const ProjectorView: React.FC = () => {
                   </div>
                 </div>
               </div>
+              <button
+                onClick={() => resetTabParameters(9)}
+                className="w-full mt-2 py-2 border border-red-900/50 bg-red-950/20 text-red-500 hover:bg-red-950/50 hover:text-red-400 rounded-xl flex items-center justify-center gap-2 font-bold transition-all cursor-pointer active:scale-95 text-[10px] uppercase tracking-wider"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Réinitialiser cet onglet
+              </button>
             </div>
           )}
         </div>
@@ -924,7 +1019,7 @@ export const ProjectorView: React.FC = () => {
     );
   };
 
-  const renderCalibratedDartboard = (isCalibrationMode: boolean) => {
+  const renderCalibratedDartboard = (isCalibrationMode: boolean, extraSvgOverlays?: React.ReactNode) => {
     let { centerX, centerY, rBullInner, rBullOuter, rTripleInner, rTripleOuter, rDoubleInner, rDoubleOuter } = calibration;
     if (targetCenterRef.current) {
       centerX = targetCenterRef.current.x;
@@ -1556,7 +1651,11 @@ export const ProjectorView: React.FC = () => {
       <svg
         className="w-full h-full max-h-full select-none"
         viewBox="0 0 1000 1000"
-        style={{ backgroundColor: (isCalibrationMode && calibrationStep !== 8) ? '#ffffff' : 'transparent', overflow: 'visible' }}
+        style={{ 
+          backgroundColor: (isCalibrationMode && calibrationStep !== 8) ? '#ffffff' : 'transparent', 
+          overflow: 'visible',
+          cursor: clickToCenterState !== 'none' ? 'none' : 'default'
+        }}
         onPointerDown={handleSvgPointerDown}
         onPointerMove={handleSvgPointerMove}
       >
@@ -1596,7 +1695,7 @@ export const ProjectorView: React.FC = () => {
           <circle cx={centerX} cy={centerY} r={rDoubleOuter * 1.01} fill="none" stroke="#4b5563" strokeWidth="2" />
         )}
 
-        {segments}
+        {calibration.arShowExtraOverlays !== false && segments}
 
         <circle
           cx={centerX}
@@ -1607,9 +1706,9 @@ export const ProjectorView: React.FC = () => {
           strokeWidth={isCalibrationMode ? (calibrationStep === 2 ? 5 : 2) : 2}
         />
 
-        {boardNumbers}
+        {calibration.arShowExtraOverlays !== false && boardNumbers}
 
-        {cricketCoches}
+        {calibration.arShowExtraOverlays !== false && cricketCoches}
 
         {/* Affichage des points lors de l'animation de fin de tour */}
         {activeAnimationIndex !== -1 && animatingDarts[activeAnimationIndex] && (
@@ -1891,7 +1990,7 @@ export const ProjectorView: React.FC = () => {
           })()
         )}
 
-        {showCross && (
+        {showCross && calibration.arShowExtraOverlays !== false && (
           <>
             <line
               x1="0"
@@ -2008,7 +2107,17 @@ export const ProjectorView: React.FC = () => {
           </g>
         )}
 
+        {/* Curseur personnalisé pour la calibration du centre */}
+        {clickToCenterState === 'center' && pointerPos && (
+          <g style={{ pointerEvents: 'none' }}>
+            <line x1={0} y1={pointerPos.y} x2={1000} y2={pointerPos.y} stroke="black" strokeWidth="1" opacity={0.3} />
+            <line x1={pointerPos.x} y1={0} x2={pointerPos.x} y2={1000} stroke="black" strokeWidth="1" opacity={0.3} />
+            <path d={`M ${pointerPos.x - 40} ${pointerPos.y} L ${pointerPos.x + 40} ${pointerPos.y} M ${pointerPos.x} ${pointerPos.y - 40} L ${pointerPos.x} ${pointerPos.y + 40}`} stroke="black" strokeWidth="1.5" />
+          </g>
+        )}
 
+        {/* Overlays personnalisés (par ex: texte centré pour le jeu Bart) */}
+        {extraSvgOverlays}
       </svg>
     );
   };
@@ -2279,9 +2388,9 @@ export const ProjectorView: React.FC = () => {
     }
   }, [room?.projectorMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Synchronisation de la calibration depuis Firestore (prioritaire en mode en ligne si non en train de calibrer)
+  // Synchronisation de la calibration depuis Firestore (prioritaire en mode en ligne si non en train de calibrer localement)
   useEffect(() => {
-    if (!room || isCalibrating) return;
+    if (!room) return;
     const firestoreCal = room.calibration;
     if (firestoreCal) {
       // Comparer pour éviter des boucles d'update inutiles
@@ -2401,7 +2510,7 @@ export const ProjectorView: React.FC = () => {
               {/* Placeholder Zone Stats pour l'étape 9 (AR Setup) */}
               {isCalibrating && calibrationStep === 9 && statsCalibrationState === 'none' && (
                 <div 
-                  className="absolute bg-zinc-300/80 border-2 border-dashed border-zinc-500 rounded-3xl p-6 shadow-xl backdrop-blur-md z-40 transition-all duration-200"
+                  className="absolute bg-zinc-300/80 border-2 border-dashed border-zinc-500 p-6 shadow-xl backdrop-blur-md z-40 transition-all duration-200"
                   style={
                     calibration.statsPanelHeight !== undefined
                       ? {
@@ -2419,17 +2528,23 @@ export const ProjectorView: React.FC = () => {
                         }
                   }
                 >
-                  <div className="text-xs uppercase font-black tracking-widest text-zinc-600 mb-4 text-center">
-                    Fausses Statistiques
+                  <div 
+                    className="font-black text-zinc-800 uppercase text-center w-full truncate"
+                    style={{ fontSize: `${calibration.statsFontSize ?? 16}px`, marginBottom: '10px' }}
+                  >
+                    EXEMPLE DE TITRE
                   </div>
-                  <div className="flex flex-col gap-2 text-sm font-bold text-zinc-700 leading-snug">
-                    <div className="h-4 bg-zinc-400/50 rounded w-3/4 animate-pulse"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-1/2 animate-pulse"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-5/6 animate-pulse mt-4"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-2/3 animate-pulse"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-3/4 animate-pulse"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-1/2 animate-pulse mt-4"></div>
-                    <div className="text-center text-xs text-zinc-500 mt-4 italic font-medium">Positionnez cette bulle avec les curseurs</div>
+                  <div 
+                    className="font-bold text-zinc-700 leading-snug overflow-hidden text-ellipsis"
+                    style={{ fontSize: `${calibration.commentsFontSize ?? 14}px` }}
+                  >
+                    Ceci est une phrase de commentaire générée automatiquement. Elle s'adapte à la taille de la boîte pour que le joueur puisse la lire facilement depuis le pas de tir.
+                  </div>
+                  <div 
+                    className="font-medium text-zinc-600 leading-snug mt-2 overflow-hidden text-ellipsis"
+                    style={{ fontSize: `${calibration.commentsFontSize ?? 14}px` }}
+                  >
+                    Une autre information importante apparaîtra ici selon les besoins du jeu.
                   </div>
                 </div>
               )}
@@ -2437,14 +2552,22 @@ export const ProjectorView: React.FC = () => {
               {/* Zone transparente de capture pour tracer le panneau de commentaires */}
               {statsCalibrationState !== 'none' && (
                 <div 
-                  className="absolute inset-0 z-50 cursor-crosshair bg-black/10"
+                  className="absolute inset-0 z-50 cursor-none"
                   onPointerDown={handleStatsPointerDown}
                   onPointerMove={handleStatsPointerMove}
                 >
+                  {/* Croix de visée fine et noire */}
+                  {statsPointerPos && (
+                    <svg className="absolute inset-0 pointer-events-none z-50" style={{ width: '100%', height: '100%' }}>
+                      <line x1={0} y1={statsPointerPos.y} x2="100%" y2={statsPointerPos.y} stroke="black" strokeWidth="1" />
+                      <line x1={statsPointerPos.x} y1={0} x2={statsPointerPos.x} y2="100%" stroke="black" strokeWidth="1" />
+                      <circle cx={statsPointerPos.x} cy={statsPointerPos.y} r="5" fill="none" stroke="black" strokeWidth="1" />
+                    </svg>
+                  )}
                   {/* Guide de tracé rouge en direct si on est en train de tracer le second point */}
                   {statsCalibrationState === 'bottom-right' && statsStartPointRef.current && (
                     <div 
-                      className="absolute border-2 border-dashed border-red-550 bg-red-500/10 rounded-2xl pointer-events-none"
+                      className="absolute border-2 border-dashed border-red-550 bg-red-500/10 pointer-events-none"
                       style={{
                         left: `${liveStatsRect ? liveStatsRect.x : (calibration.statsPanelX ?? 0)}px`,
                         top: `${liveStatsRect ? liveStatsRect.y : (calibration.statsPanelY ?? 0)}px`,
@@ -2769,6 +2892,33 @@ export const ProjectorView: React.FC = () => {
     );
   }
 
+  const renderStatsCalibrationOverlay = () => {
+    if (statsCalibrationState === 'none') return null;
+    return (
+      <div 
+        className="absolute inset-0 z-50 cursor-crosshair bg-black/10"
+        onPointerDown={handleStatsPointerDown}
+        onPointerMove={handleStatsPointerMove}
+      >
+        {/* Guide de tracé rouge en direct si on est en train de tracer le second point */}
+        {statsCalibrationState === 'bottom-right' && statsStartPointRef.current && (
+          <div 
+            className="absolute border-2 border-dashed border-red-550 bg-red-500/10 rounded-2xl pointer-events-none"
+            style={{
+              left: `${liveStatsRect ? liveStatsRect.x : (calibration?.statsPanelX ?? 0)}px`,
+              top: `${liveStatsRect ? liveStatsRect.y : (calibration?.statsPanelY ?? 0)}px`,
+              width: `${liveStatsRect ? liveStatsRect.width : (calibration?.statsPanelWidth ?? 0)}px`,
+              height: `${liveStatsRect ? liveStatsRect.height : (calibration?.statsPanelHeight ?? 0)}px`
+            }}
+          />
+        )}
+        <div className="absolute top-4 left-4 bg-black/85 text-white border border-red-500/40 px-3.5 py-1.5 rounded-full text-xs font-black shadow-lg animate-pulse pointer-events-none">
+          🎯 {statsCalibrationState === 'top-left' ? 'Cliquez pour le coin HAUT-GAUCHE' : 'Glissez/cliquez pour le coin BAS-DROITE'}
+        </div>
+      </div>
+    );
+  };
+
   // --- RENDU 3 : EN COURS DE JEU (PLAYING) ---
   if (room?.gameType === 'bart') {
     return (
@@ -2785,6 +2935,7 @@ export const ProjectorView: React.FC = () => {
         calibrationStep={calibrationStep}
         renderProjectorCalibrationInterface={renderProjectorCalibrationInterface}
         lastCalibrationHit={lastCalibrationHit}
+        renderStatsCalibrationOverlay={renderStatsCalibrationOverlay}
       />
     );
   }
@@ -2804,6 +2955,7 @@ export const ProjectorView: React.FC = () => {
         calibrationStep={calibrationStep}
         renderProjectorCalibrationInterface={renderProjectorCalibrationInterface}
         lastCalibrationHit={lastCalibrationHit}
+        renderStatsCalibrationOverlay={renderStatsCalibrationOverlay}
       />
     );
   }
@@ -3053,17 +3205,23 @@ export const ProjectorView: React.FC = () => {
                         }
                   }
                 >
-                  <div className="text-xs uppercase font-black tracking-widest text-zinc-600 mb-4 text-center">
-                    Fausses Statistiques
+                  <div 
+                    className="font-black text-zinc-800 uppercase text-center w-full truncate"
+                    style={{ fontSize: `${calibration.statsFontSize ?? 16}px`, marginBottom: '10px' }}
+                  >
+                    EXEMPLE DE TITRE
                   </div>
-                  <div className="flex flex-col gap-2 text-sm font-bold text-zinc-700 leading-snug">
-                    <div className="h-4 bg-zinc-400/50 rounded w-3/4 animate-pulse"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-1/2 animate-pulse"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-5/6 animate-pulse mt-4"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-2/3 animate-pulse"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-3/4 animate-pulse"></div>
-                    <div className="h-4 bg-zinc-400/50 rounded w-1/2 animate-pulse mt-4"></div>
-                    <div className="text-center text-xs text-zinc-500 mt-4 italic font-medium">Positionnez cette bulle avec les curseurs</div>
+                  <div 
+                    className="font-bold text-zinc-700 leading-snug overflow-hidden text-ellipsis"
+                    style={{ fontSize: `${calibration.commentsFontSize ?? 14}px` }}
+                  >
+                    Ceci est une phrase de commentaire générée automatiquement. Elle s'adapte à la taille de la boîte pour que le joueur puisse la lire facilement depuis le pas de tir.
+                  </div>
+                  <div 
+                    className="font-medium text-zinc-600 leading-snug mt-2 overflow-hidden text-ellipsis"
+                    style={{ fontSize: `${calibration.commentsFontSize ?? 14}px` }}
+                  >
+                    Une autre information importante apparaîtra ici selon les besoins du jeu.
                   </div>
                 </div>
               )}

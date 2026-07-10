@@ -15,6 +15,7 @@ interface BartProjectorGameProps {
   calibrationStep: number;
   renderProjectorCalibrationInterface: () => React.ReactNode;
   lastCalibrationHit: { region: string; score: number } | null;
+  renderStatsCalibrationOverlay?: () => React.ReactNode;
 }
 
 export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({ 
@@ -29,7 +30,8 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
   setIsCalibrating,
   calibrationStep,
   renderProjectorCalibrationInterface,
-  lastCalibrationHit
+  lastCalibrationHit,
+  renderStatsCalibrationOverlay
 }) => {
   const bartConfig = room.bartConfig!;
   const players = room.players;
@@ -160,9 +162,41 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
           }`}
         >
           {projectorMode === 'ar' ? (
-            <div className="w-full h-full relative flex items-center justify-center">
-              {renderCalibratedDartboard(isCalibrating)}
-              
+            <div className="w-full h-full relative flex flex-col justify-center items-center">
+              <div className="w-full h-1/2 flex items-center justify-center relative overflow-visible">
+                {renderCalibratedDartboard(
+                  isCalibrating,
+                  /* OVERLAY: WAITING FOR SERVE (AR MODE) - CENTRÉ SUR LA CIBLE DANS LE SVG */
+                  (!isCalibrating && !bartConfig.currentTarget) ? (
+                    <g className="animate-pulse pointer-events-none" style={{ filter: 'drop-shadow(0px 4px 6px rgba(0,0,0,0.5))' }}>
+                      <text 
+                        x={calibration?.centerX ?? 500}
+                        y={(calibration?.centerY ?? 500) - (calibration?.rDoubleOuter ?? 350) * 0.15}
+                        textAnchor="middle"
+                        fill="#dc2626"
+                        fontWeight="900"
+                        fontSize={`${(calibration?.rDoubleOuter ?? 350) * 0.08}px`}
+                        className="uppercase tracking-[0.3em]"
+                      >
+                        Service
+                      </text>
+                      <text 
+                        x={calibration?.centerX ?? 500}
+                        y={(calibration?.centerY ?? 500) + (calibration?.rDoubleOuter ?? 350) * 0.1}
+                        textAnchor="middle"
+                        fill="#000000"
+                        fontWeight="900"
+                        fontSize={`${(calibration?.rDoubleOuter ?? 350) * 0.25}px`}
+                        className="uppercase tracking-tighter"
+                        style={{ filter: 'drop-shadow(0px 0px 8px rgba(255,255,255,0.9))' }}
+                      >
+                        {currentServer.name}
+                      </text>
+                    </g>
+                  ) : null
+                )}
+              </div>
+
               {/* Placeholder Zone Stats pour l'étape 9 (AR Setup) */}
               {isCalibrating && calibrationStep === 9 && (
                 <div 
@@ -199,6 +233,9 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
                 </div>
               )}
 
+              {/* Overlay de capture des clics pour le panneau de stats */}
+              {renderStatsCalibrationOverlay && renderStatsCalibrationOverlay()}
+
               {/* Bouton pour lancer la calibration (engrenage) */}
               {!isCalibrating && (
                 <button
@@ -220,47 +257,21 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
               {/* Éléments de jeu normaux (seulement si non calibration) */}
               {!isCalibrating && (
                 <>
-                  {/* Zone Cible en bas en AR */}
-                  <div className="absolute bottom-16 left-0 right-0 flex justify-center z-20 pointer-events-none">
+                  {/* Zone Cible en haut à gauche en AR */}
+                  <div className="absolute top-12 left-4 z-20 pointer-events-none">
                     {bartConfig.currentTarget ? (
-                      <div className="text-center animate-fadeIn">
-                        <div className="flex items-baseline justify-center gap-4">
-                          <span className="text-[10rem] md:text-[12rem] leading-none font-black text-white tracking-tighter drop-shadow-[0_0_30px_rgba(255,255,255,0.3)]">
+                      <div className="animate-fadeIn">
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-6xl md:text-8xl leading-none font-black text-white tracking-tighter drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]">
                             {bartConfig.currentTarget.number === 'bull' ? 'BULL' : bartConfig.currentTarget.number}
                           </span>
-                          <span className="text-6xl md:text-7xl font-black text-zinc-400 lowercase drop-shadow-xl">
-                            {bartConfig.currentTarget.zone === 'inner' ? 'intérieur' : 'extérieur'}
+                          <span className="text-3xl md:text-4xl font-black text-zinc-300 drop-shadow-lg">
+                            {bartConfig.currentTarget.zone === 'inner' ? 'Int' : 'Ext'}
                           </span>
                         </div>
                       </div>
                     ) : null}
                   </div>
-
-                  {/* OVERLAY: WAITING FOR SERVE (AR MODE) */}
-                  {!bartConfig.currentTarget && (
-                    <div 
-                      className="absolute z-30 flex flex-col items-center justify-center pointer-events-none animate-pulse"
-                      style={{
-                        left: `${calibration?.centerX || 960}px`,
-                        top: `${calibration?.centerY || 540}px`,
-                        transform: 'translate(-50%, -50%)',
-                        width: `${(calibration?.rDoubleOuter || 350) * 2}px`
-                      }}
-                    >
-                      <span 
-                        className="font-black text-red-600 block uppercase tracking-[0.3em] drop-shadow-md"
-                        style={{ fontSize: `${(calibration?.rDoubleOuter || 350) * 0.08}px`, marginBottom: `${(calibration?.rDoubleOuter || 350) * 0.02}px` }}
-                      >
-                        Service
-                      </span>
-                      <span 
-                        className="leading-none font-black text-black uppercase tracking-tighter drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] px-4 text-center break-words max-w-full"
-                        style={{ fontSize: `${(calibration?.rDoubleOuter || 350) * 0.25}px` }}
-                      >
-                        {currentServer.name}
-                      </span>
-                    </div>
-                  )}
 
                   {/* Zone Stats à gauche en AR */}
                   <div 
@@ -355,8 +366,8 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
                         <span className="text-7xl md:text-8xl leading-none font-black text-zinc-950 tracking-tighter">
                           {bartConfig.currentTarget.number === 'bull' ? 'BULL' : bartConfig.currentTarget.number}
                         </span>
-                        <span className="text-3xl font-black text-zinc-500 lowercase">
-                          {bartConfig.currentTarget.zone === 'inner' ? 'intérieur' : 'extérieur'}
+                        <span className="text-3xl font-black text-zinc-500">
+                          {bartConfig.currentTarget.zone === 'inner' ? 'Int' : 'Ext'}
                         </span>
                       </div>
                     </div>

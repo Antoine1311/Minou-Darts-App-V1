@@ -85,6 +85,7 @@ export interface CalibrationSettings {
   rBullInner: number;
   haloWhiteRadius?: number;
   haloMaxRadius?: number;
+  arShowExtraOverlays?: boolean;
   statsPanelY?: number;
   statsPanelX?: number;
   statsFontSize?: number;
@@ -219,123 +220,11 @@ export const roomService = {
   },
 
   /**
-   * Fonction pure calculant le prochain état du salon après un lancer X01.
-   * Conçue pour être partagée entre le mode en ligne et le mode local de la télécommande.
-   */
-  calculateNextX01State: (room: RoomData, points: number, isDouble: boolean = false, throwLabel?: string): RoomData => {
-    const updatedRoom = { 
-      ...room,
-      players: room.players.map(p => ({ 
-        ...p, 
-        history: [...p.history],
-        currentRoundThrows: p.currentRoundThrows ? [...p.currentRoundThrows] : []
-      }))
-    };
-    const playerIndex = updatedRoom.activePlayerIndex;
-    const player = updatedRoom.players[playerIndex];
-
-    // Initialiser scoreBeforeRound si non défini
-    if (player.scoreBeforeRound === undefined) {
-      player.scoreBeforeRound = player.score;
-    }
-
-    // Si on commence un nouveau tour, s'assurer que currentRoundThrows est vide et roundBust est faux pour le joueur actif
-    if (player.dartsLeft === 3) {
-      player.currentRoundThrows = [];
-      player.roundBust = false;
-    }
-
-    // 1. Enregistrer le lancer
-    player.history = [...player.history, points];
-    player.dartsLeft -= 1;
-    player.throwsCount += 1;
-    player.totalPoints += points;
-
-    // Ajouter le libellé du lancer
-    if (throwLabel) {
-      player.currentRoundThrows = [...(player.currentRoundThrows || []), throwLabel];
-    } else {
-      player.currentRoundThrows = [...(player.currentRoundThrows || []), String(points)];
-    }
-
-    // Calcul du nouveau score théorique
-    const newScore = player.score - points;
-    let isBust = false;
-
-    // Règle du "Bust" (Dépassement) et Double Out
-    if (newScore < 0) {
-      isBust = true;
-    } else if (updatedRoom.doubleOut) {
-      // Si doubleOut activé, le score ne peut pas tomber à 1
-      if (newScore === 1) {
-        isBust = true;
-      }
-      // Pour arriver à 0, il faut un Double
-      else if (newScore === 0 && !isDouble) {
-        isBust = true;
-      }
-    }
-
-    if (isBust) {
-      // Bust! On remet le score du début de tour (qui était scoreBeforeRound)
-      player.score = player.scoreBeforeRound;
-      // On consomme toutes les fléchettes du tour
-      player.dartsLeft = 0; 
-      player.roundBust = true;
-      player.bustsCount = (player.bustsCount || 0) + 1;
-    } else {
-      player.score = newScore;
-      player.roundBust = false;
-    }
-
-    // Calcul de la moyenne métrique (Standard 3 fléchettes : (points totaux / lancers) * 3)
-    if (player.throwsCount > 0) {
-      player.avg = parseFloat(((player.totalPoints / player.throwsCount) * 3).toFixed(1));
-    }
-
-    // Mettre à jour le joueur dans le tableau
-    updatedRoom.players[playerIndex] = player;
-
-    // Vérifier si le tour est terminé (3 fléchettes lancées, Bust, ou victoire)
-    const isRoundEnded = player.dartsLeft === 0 || player.score === 0;
-    if (isRoundEnded) {
-      const roundScore = player.roundBust ? 0 : ((player.scoreBeforeRound ?? player.score) - player.score);
-      player.roundScores = [...(player.roundScores || []), roundScore];
-      player.lastRoundScore = roundScore;
-      player.bestRound = Math.max(0, ...(player.roundScores || []));
-    }
-
-    // Vérifier si le joueur a gagné
-    if (player.score === 0) {
-      updatedRoom.status = 'finished';
-      updatedRoom.winnerName = player.name;
-    } 
-    // Gérer la fin de tour (les 3 fléchettes ont été lancées ou Bust)
-    else if (player.dartsLeft === 0) {
-      // Réinitialiser les fléchettes pour le joueur qui vient de finir
-      player.dartsLeft = 3;
-      updatedRoom.players[playerIndex] = player;
-
-      // Passer au joueur suivant
-      const nextPlayerIndex = (playerIndex + 1) % updatedRoom.players.length;
-      updatedRoom.activePlayerIndex = nextPlayerIndex;
-      
-      // Mettre à jour scoreBeforeRound pour le joueur suivant pour son nouveau tour
-      updatedRoom.players[nextPlayerIndex].scoreBeforeRound = updatedRoom.players[nextPlayerIndex].score;
-      
-      // Réinitialiser les lancers du tour courant du joueur suivant
-      updatedRoom.players[nextPlayerIndex].currentRoundThrows = [];
-      updatedRoom.players[nextPlayerIndex].roundBust = false;
-    }
-
-    return updatedRoom;
-  },
-
-  /**
    * Enregistre un lancer de fléchette pour le joueur actif et calcule les scores
    */
   recordThrow: async (roomId: string, room: RoomData, points: number, isDouble: boolean = false, throwLabel?: string): Promise<void> => {
-    const nextRoomState = roomService.calculateNextX01State(room, points, isDouble, throwLabel);
+    const { calculateNextX01State } = await import('./x01Engine');
+    const nextRoomState = calculateNextX01State(room, points, isDouble, throwLabel);
 
     // Sauvegarder dans Firestore
     await roomService.updateRoom(roomId, {

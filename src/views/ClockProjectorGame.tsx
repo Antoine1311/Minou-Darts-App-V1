@@ -15,6 +15,7 @@ interface ClockProjectorGameProps {
   calibrationStep: number;
   renderProjectorCalibrationInterface: () => React.ReactNode;
   lastCalibrationHit: { region: string; score: number } | null;
+  renderStatsCalibrationOverlay?: () => React.ReactNode;
 }
 
 export const ClockProjectorGame: React.FC<ClockProjectorGameProps> = ({
@@ -25,7 +26,11 @@ export const ClockProjectorGame: React.FC<ClockProjectorGameProps> = ({
   setShowModeSelector,
   renderCalibratedDartboard,
   isCalibrating,
-  renderProjectorCalibrationInterface
+  setIsCalibrating,
+  calibrationStep,
+  renderProjectorCalibrationInterface,
+  lastCalibrationHit,
+  renderStatsCalibrationOverlay
 }) => {
   const players = room.players;
   const activePlayerIndex = room.activePlayerIndex;
@@ -53,18 +58,21 @@ export const ClockProjectorGame: React.FC<ClockProjectorGameProps> = ({
       {/* 1. MOITIÉ GAUCHE : La cible de fléchettes (Projetée en classique ou AR) */}
       {projectorMode !== 'fullscreen' && (
         <div 
-          className="w-1/2 h-full flex items-center justify-center p-4 md:p-6 transition-all duration-300 relative"
-          style={{
-            transform: projectorMode === 'ar' ? 'scale(1.15)' : 'none',
-            transformOrigin: 'center center'
-          }}
+          className="w-1/2 h-full flex flex-col items-center justify-center relative transition-all duration-300"
         >
-          {isCalibrating ? (
-            <div className="w-full h-full flex items-center justify-center">
-              {renderCalibratedDartboard(true)}
+          {projectorMode === 'ar' ? (
+            <div className="w-full h-full relative flex flex-col justify-center items-center">
+              <div className="w-full h-1/2 flex items-center justify-center relative overflow-visible">
+                {renderCalibratedDartboard(isCalibrating)}
+              </div>
+
+              {/* Overlay de capture des clics pour le panneau de stats */}
+              {renderStatsCalibrationOverlay && renderStatsCalibrationOverlay()}
             </div>
           ) : (
-            renderCalibratedDartboard(false)
+            <div className="w-full h-full flex items-center justify-center p-4 md:p-6">
+              {renderCalibratedDartboard(false)}
+            </div>
           )}
         </div>
       )}
