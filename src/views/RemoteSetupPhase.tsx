@@ -1,14 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Users, Settings, Tv, Maximize2, Sparkles, ExternalLink, Copy, Check, Target, Crosshair, Clock, RotateCcw, Plus, Play, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Users, Settings, Tv, Check, Target, Crosshair, Clock, RotateCcw, Plus, Play, Trash2, Shuffle } from 'lucide-react';
 import type { RoomData, GameType, CricketVariant } from '../services/roomService';
 import { playerService } from '../services/playerService';
 import { roomService } from '../services/roomService';
 import { useGameStore } from '../store/gameStore';
 import type { GlobalPlayer } from '../services/playerService';
-import { QRCodeSVG } from 'qrcode.react';
-import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
-import { getCheckoutSuggestion } from '../services/checkoutSuggestions';
 import { generateCricketTargets, createEmptyMarks } from '../services/cricketEngine';
 import { createEmptyBartState } from '../services/bartEngine';
 
@@ -16,6 +13,7 @@ interface RemoteSetupPhaseProps {
   roomId: string | null;
   isLocalMode: boolean;
   currentRoom: RoomData | null;
+  initialSetupStep?: 'players' | 'game';
   onUpdateRoom: (data: Partial<RoomData>) => Promise<void>;
   onExit: () => void;
   setShowProjectorSettingsModal: (v: boolean) => void;
@@ -27,17 +25,19 @@ interface RemoteSetupPhaseProps {
 }
 
 export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
-  roomId, isLocalMode, currentRoom, onUpdateRoom, onExit,
-  setShowProjectorSettingsModal, setShowProjectionModal, showCalibrationPanel, setShowCalibrationPanel,
-  remoteProjectorMode, setRemoteProjectorModeAndSync
+  roomId, isLocalMode, currentRoom, initialSetupStep = 'players', onUpdateRoom, onExit,
+  setShowProjectorSettingsModal, setShowProjectionModal, setShowCalibrationPanel
 }) => {
   const { user } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const setLocalRoom = useGameStore(state => state.setLocalRoom);
 
+  const [setupStep, setSetupStep] = useState<'players' | 'game'>(initialSetupStep);
 
-  const [setupStep, setSetupStep] = useState<'players' | 'game'>('players');
+  useEffect(() => {
+    setSetupStep(initialSetupStep);
+  }, [initialSetupStep]);
 
   const [savedGameData, setSavedGameData] = useState<RoomData | null>(null);
 
@@ -65,20 +65,26 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
 
   const [isPlayersLoaded, setIsPlayersLoaded] = useState(false);
 
-  // Charger les joueurs depuis Firebase
+  // Charger les joueurs depuis Firebase avec secours localStorage
   useEffect(() => {
+    const localPlayers: GlobalPlayer[] = JSON.parse(localStorage.getItem('minou-dart-local-saved-players') || '[]');
     if (user) {
       playerService.getPlayersByOwner(user.uid)
         .then(players => {
-          setSavedPlayers(players);
+          const combined = [...players];
+          for (const lp of localPlayers) {
+            if (!combined.some(p => p.name === lp.name)) combined.push(lp);
+          }
+          setSavedPlayers(combined.sort((a, b) => a.name.localeCompare(b.name)));
           setIsPlayersLoaded(true);
         })
         .catch(err => {
           console.error(err);
+          setSavedPlayers(localPlayers);
           setIsPlayersLoaded(true);
         });
     } else {
-      setSavedPlayers([]);
+      setSavedPlayers(localPlayers);
       setIsPlayersLoaded(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
@@ -86,25 +92,53 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
 
   const handleRemoveSavedPlayer = async (name: string) => {
     const playerToRemove = savedPlayers.find(p => p.name === name);
+    // Purger systématiquement du localStorage pour éviter toute réapparition ("joueur zombie")
+    try {
+      const localSaved: GlobalPlayer[] = JSON.parse(localStorage.getItem('minou-dart-local-saved-players') || '[]');
+      const filteredLocal = localSaved.filter(p => p.name !== name && p.id !== playerToRemove?.id);
+      localStorage.setItem('minou-dart-local-saved-players', JSON.stringify(filteredLocal));
+    } catch (e) {
+      console.error("Erreur mise à jour localStorage lors de la suppression:", e);
+    }
+
     if (playerToRemove) {
       try {
-        await playerService.deletePlayer(playerToRemove.id);
-        setSavedPlayers(prev => prev.filter(p => p.id !== playerToRemove.id));
-        setSelectedPlayerNames(prev => prev.filter(p => p !== name));
+        if (user && !playerToRemove.id.startsWith('local-player-')) {
+          await playerService.deletePlayer(playerToRemove.id);
+        }
       } catch (err) {
-        console.error("Erreur suppression joueur:", err);
+        console.error("Erreur suppression joueur Cloud:", err);
       }
+      setSavedPlayers(prev => prev.filter(p => p.id !== playerToRemove.id && p.name !== name));
+      setSelectedPlayerNames(prev => {
+        const next = prev.filter(p => p !== name);
+        localStorage.setItem('minou-dart-last-selected-players', JSON.stringify(next));
+        return next;
+      });
     }
   };
 
   const handleUpdatePlayerEmoji = async (name: string, newEmoji: string) => {
     const playerToUpdate = savedPlayers.find(p => p.name === name);
+    // Synchroniser systématiquement l'emoji en localStorage
+    try {
+      const localSaved: GlobalPlayer[] = JSON.parse(localStorage.getItem('minou-dart-local-saved-players') || '[]');
+      if (localSaved.some(p => p.name === name)) {
+        const updatedLocal = localSaved.map(p => p.name === name ? { ...p, emoji: newEmoji } : p);
+        localStorage.setItem('minou-dart-local-saved-players', JSON.stringify(updatedLocal));
+      }
+    } catch (e) {
+      console.error("Erreur mise à jour emoji localStorage:", e);
+    }
+
     if (playerToUpdate) {
-      try {
-        await playerService.updatePlayerEmoji(playerToUpdate.id, newEmoji);
-        setSavedPlayers(prev => prev.map(p => p.id === playerToUpdate.id ? { ...p, emoji: newEmoji } : p));
-      } catch (err) {
-        console.error("Erreur mise à jour emoji:", err);
+      setSavedPlayers(prev => prev.map(p => p.id === playerToUpdate.id ? { ...p, emoji: newEmoji } : p));
+      if (user && !playerToUpdate.id.startsWith('local-player-')) {
+        try {
+          await playerService.updatePlayerEmoji(playerToUpdate.id, newEmoji);
+        } catch (err) {
+          console.error("Erreur mise à jour emoji Cloud:", err);
+        }
       }
     }
   };
@@ -115,6 +149,21 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
     } else {
       setSelectedPlayerNames([...selectedPlayerNames, name]);
     }
+  };
+
+  // Mélanger aléatoirement l'ordre des joueurs sélectionnés (algorithme de Fisher-Yates équitable)
+  const [justShuffled, setJustShuffled] = useState<boolean>(false);
+  const handleShuffleSelectedPlayers = () => {
+    if (selectedPlayerNames.length < 2) return;
+    const shuffled = [...selectedPlayerNames];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    setSelectedPlayerNames(shuffled);
+    localStorage.setItem('minou-dart-last-selected-players', JSON.stringify(shuffled));
+    setJustShuffled(true);
+    setTimeout(() => setJustShuffled(false), 900);
   };
 
   // Joueurs sélectionnés pour la partie — restaurés depuis localStorage (dernière partie)
@@ -159,16 +208,43 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
   const handleAddNewPlayer = async () => {
     const name = newPlayerName.trim();
     if (!name) return;
-    if (!user) {
-      setError("Vous n'êtes pas authentifié avec Firebase. Vérifiez que la connexion anonyme est activée dans la console Firebase.");
-      return;
-    }
-    
+
+    const emptyStats = { gamesPlayed: 0, wins: 0, totalPoints: 0, dartsThrown: 0 };
+
     if (!savedPlayers.some(p => p.name === name)) {
       try {
-        const newPlayer = await playerService.createPlayer(user.uid, name, selectedEmoji);
+        let newPlayer: GlobalPlayer;
+        if (user && !isLocalMode) {
+          try {
+            newPlayer = await playerService.createPlayer(user.uid, name, selectedEmoji);
+          } catch {
+            newPlayer = {
+              id: `local-player-${Date.now()}`,
+              ownerId: user.uid,
+              name,
+              emoji: selectedEmoji || '🎯',
+              stats: emptyStats,
+              createdAt: new Date()
+            };
+          }
+        } else {
+          newPlayer = {
+            id: `local-player-${Date.now()}`,
+            ownerId: user ? user.uid : 'local',
+            name,
+            emoji: selectedEmoji || '🎯',
+            stats: emptyStats,
+            createdAt: new Date()
+          };
+        }
+
+        // Sauvegarde locale persistante
+        const localSaved: GlobalPlayer[] = JSON.parse(localStorage.getItem('minou-dart-local-saved-players') || '[]');
+        if (!localSaved.some(p => p.name === name)) {
+          localStorage.setItem('minou-dart-local-saved-players', JSON.stringify([...localSaved, newPlayer]));
+        }
+
         setSavedPlayers(prev => [...prev, newPlayer].sort((a, b) => a.name.localeCompare(b.name)));
-        // Sélectionner automatiquement le nouveau joueur
         setSelectedPlayerNames(prev => [...prev, name]);
       } catch (err) {
         console.error("Erreur création joueur:", err);
@@ -183,6 +259,14 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
   // Lancer officiellement la partie
   const handleStartGame = async () => {
     if (!currentRoom || selectedPlayerNames.length === 0) return;
+    if (selectedGameType === 'bart' && selectedPlayerNames.length !== 2) {
+      setError("Le mode Bart (Tennis) nécessite exactement 2 joueurs sélectionnés.");
+      return;
+    }
+    setError(null);
+
+    // Mémoriser immédiatement la sélection de joueurs pour les prochaines parties
+    localStorage.setItem('minou-dart-last-selected-players', JSON.stringify(selectedPlayerNames));
     
     setIsSubmitting(true);
     try {
@@ -194,8 +278,7 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
       );
       
       const shuffledPlayerNames = [...selectedPlayerNames];
-      const isRandomOrderEnabled = selectedRandomOrder && (selectedGameType === 'x01' || selectedGameType === 'cricket');
-      if (isRandomOrderEnabled && shuffledPlayerNames.length > 1) {
+      if (selectedRandomOrder && shuffledPlayerNames.length > 1) {
         for (let i = shuffledPlayerNames.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [shuffledPlayerNames[i], shuffledPlayerNames[j]] = [shuffledPlayerNames[j], shuffledPlayerNames[i]];
@@ -205,7 +288,7 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
       const initialPlayers = shuffledPlayerNames.map(name => {
         const playerObj = savedPlayers.find(p => p.name === name);
         return {
-          globalId: playerObj?.id,
+          ...(playerObj?.id ? { globalId: playerObj.id } : {}),
           name,
           emoji: playerObj?.emoji || '🎯',
           score: selectedGameType === 'x01' ? selectedTargetScore : 0,
@@ -224,7 +307,11 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
           bestCricketRound: 0,
           bustsCount: 0,
           currentRoundThrows: [],
-          ...(selectedGameType === 'cricket' ? { cricketMarks: createEmptyMarks(targets) } : {}),
+          ...(selectedGameType === 'cricket' ? {
+            cricketMarks: createEmptyMarks(targets),
+            cricketTotalMarks: 0,
+            cricketCurrentRoundMarks: 0
+          } : {}),
           ...(selectedGameType === 'bart' ? { bartState: createEmptyBartState() } : {}),
           ...(selectedGameType === 'clock' ? {
             clockState: {
@@ -250,6 +337,8 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
         players: initialPlayers as any,
         activePlayerIndex: 0,
         winnerName: '',
+        statsRecorded: false,
+        lastCompletedRound: null,
         ...(selectedGameType === 'bart' ? {
           bartConfig: {
             setsToWin: selectedBartSets,
@@ -275,6 +364,75 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
   };
 
   const updateRoomState = onUpdateRoom; // pour compatibilité
+
+  const renderSavedGameBanner = () => {
+    if (!savedGameData) return null;
+    return (
+      <div 
+        className="p-5 rounded-2xl border border-green-500/40 bg-green-500/10 hover:bg-green-500/15 transition-all cursor-pointer shadow-lg animate-fadeIn flex flex-col gap-3 relative overflow-hidden group"
+        onClick={async () => {
+          setIsSubmitting(true);
+          try {
+            if (isLocalMode) {
+              setLocalRoom({
+                ...savedGameData,
+                roomId: 'LOCAL',
+                status: 'playing'
+              });
+            } else if (roomId) {
+              await roomService.updateRoom(roomId, {
+                status: 'playing',
+                gameType: savedGameData.gameType,
+                targetScore: savedGameData.targetScore,
+                doubleOut: savedGameData.doubleOut,
+                cricketScoringMode: savedGameData.cricketScoringMode,
+                cricketVariant: savedGameData.cricketVariant,
+                cricketTargets: savedGameData.cricketTargets,
+                players: savedGameData.players,
+                activePlayerIndex: savedGameData.activePlayerIndex,
+                winnerName: savedGameData.winnerName || '',
+                bartConfig: savedGameData.bartConfig,
+                clockConfig: savedGameData.clockConfig || undefined,
+                statsRecorded: savedGameData.statsRecorded ?? false,
+                lastCompletedRound: savedGameData.lastCompletedRound ?? null
+              });
+            }
+            localStorage.removeItem('minou-darts-saved-active-game');
+            setSavedGameData(null);
+          } catch (err) {
+            console.error("Erreur lors de la reprise de la partie :", err);
+          } finally {
+            setIsSubmitting(false);
+          }
+        }}
+      >
+        <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+          <RotateCcw className="w-24 h-24 text-green-500" />
+        </div>
+        <div className="flex items-center justify-between z-10">
+          <h3 className="font-extrabold text-sm uppercase tracking-wider flex items-center gap-2 text-green-400">
+            <RotateCcw className="w-5 h-5 text-green-400" />
+            <span>Reprendre la partie en cours</span>
+          </h3>
+          <span className="text-[9px] bg-green-500 text-black font-black px-2 py-0.5 rounded uppercase tracking-wider animate-pulse">
+            Actif
+          </span>
+        </div>
+        
+        <div className="text-xs text-zinc-300 z-10 space-y-1">
+          <p>Mode : <strong className="text-white capitalize">{
+            savedGameData.gameType === 'x01' ? `X01 (${savedGameData.targetScore})` : 
+            savedGameData.gameType === 'clock' ? "Tour de l'horloge" :
+            savedGameData.gameType
+          }</strong></p>
+          <p>Joueurs : <strong className="text-white">{savedGameData.players.map(p => p.name).join(', ')}</strong></p>
+        </div>
+        <div className="text-[10px] text-green-400/80 font-bold z-10 flex items-center gap-1 mt-1 group-hover:translate-x-1 transition-transform">
+          <span>Cliquez ici pour reprendre la partie</span> &rarr;
+        </div>
+      </div>
+    );
+  };
 
   
   
@@ -344,6 +502,7 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
           /* ── ÉTAPE 1 : SÉLECTION DYNAMIQUE DES JOUEURS ── */
           <>
             <main className="flex-grow p-6 max-w-md mx-auto w-full space-y-6 overflow-y-auto">
+              {renderSavedGameBanner()}
               <div className="space-y-4">
                 <label className="block text-xs font-bold text-theme-text-secondary uppercase tracking-widest flex items-center gap-2">
                   <Users className="w-4 h-4 text-theme-accent" /> Ajouter un nouveau joueur
@@ -379,22 +538,44 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
               </div>
 
               <div className="space-y-3">
-                <label className="block text-xs font-bold text-theme-text-secondary uppercase tracking-widest">
-                  Joueurs enregistrés ({selectedPlayerNames.length} actifs)
-                </label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="block text-xs font-bold text-theme-text-secondary uppercase tracking-widest">
+                    Joueurs enregistrés ({selectedPlayerNames.length} actifs)
+                  </label>
+                  {selectedPlayerNames.length >= 2 && (
+                    <button
+                      type="button"
+                      onClick={handleShuffleSelectedPlayers}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 cursor-pointer ${
+                        justShuffled
+                          ? 'bg-theme-accent text-black border-theme-accent shadow-md'
+                          : 'bg-theme-accent/15 hover:bg-theme-accent text-theme-accent hover:text-black border-theme-accent/40'
+                      }`}
+                      title="Tirer au sort l'ordre de passage des joueurs sélectionnés"
+                    >
+                      <Shuffle className={`w-3 h-3 ${justShuffled ? 'animate-spin' : ''}`} />
+                      <span>{justShuffled ? 'Ordre tiré !' : 'Tirage aléatoire'}</span>
+                    </button>
+                  )}
+                </div>
                 
                 <div className="space-y-2 pr-1">
                   {(() => {
                     const sortedPlayersList = [...savedPlayers].sort((a, b) => {
-                      const aSelected = selectedPlayerNames.includes(a.name);
-                      const bSelected = selectedPlayerNames.includes(b.name);
+                      const aIdx = selectedPlayerNames.indexOf(a.name);
+                      const bIdx = selectedPlayerNames.indexOf(b.name);
+                      const aSelected = aIdx !== -1;
+                      const bSelected = bIdx !== -1;
+                      if (aSelected && bSelected) return aIdx - bIdx;
                       if (aSelected && !bSelected) return -1;
                       if (!aSelected && bSelected) return 1;
                       return a.name.localeCompare(b.name);
                     });
 
                     return sortedPlayersList.map((player) => {
-                      const isSelected = selectedPlayerNames.includes(player.name);
+                      const orderIdx = selectedPlayerNames.indexOf(player.name);
+                      const isSelected = orderIdx !== -1;
+                      const orderLabel = orderIdx === 0 ? '1er' : `${orderIdx + 1}e`;
                       return (
                         <div
                           key={player.name}
@@ -411,6 +592,11 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
                             }`}>
                               {isSelected && <Check className="w-3.5 h-3.5 stroke-[3px]" />}
                             </span>
+                            {isSelected && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-theme-accent text-black text-[10px] font-black uppercase tracking-wider">
+                                {orderLabel}
+                              </span>
+                            )}
                             <span className={`font-bold flex items-center gap-2 ${isSelected ? 'text-theme-accent' : 'text-theme-text-primary'}`}>
                               <span>{player.name}</span>
                               <select
@@ -469,69 +655,7 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
             <main className="flex-grow p-6 max-w-md mx-auto w-full space-y-6 overflow-y-auto">
               
               {/* Reprendre partie en cours */}
-              {savedGameData && (
-                <div 
-                  className="p-5 rounded-2xl border border-green-500/40 bg-green-500/10 hover:bg-green-500/15 transition-all cursor-pointer shadow-lg animate-fadeIn flex flex-col gap-3 relative overflow-hidden group"
-                  onClick={async () => {
-                    setIsSubmitting(true);
-                    try {
-                      if (isLocalMode) {
-                        setLocalRoom({
-                          ...savedGameData,
-                          roomId: 'LOCAL',
-                          status: 'playing'
-                        });
-                      } else if (roomId) {
-                        await roomService.updateRoom(roomId, {
-                          status: 'playing',
-                          gameType: savedGameData.gameType,
-                          targetScore: savedGameData.targetScore,
-                          doubleOut: savedGameData.doubleOut,
-                          cricketScoringMode: savedGameData.cricketScoringMode,
-                          cricketVariant: savedGameData.cricketVariant,
-                          cricketTargets: savedGameData.cricketTargets,
-                          players: savedGameData.players,
-                          activePlayerIndex: savedGameData.activePlayerIndex,
-                          winnerName: savedGameData.winnerName || '',
-                          bartConfig: savedGameData.bartConfig,
-                          clockConfig: savedGameData.clockConfig || undefined
-                        });
-                      }
-                      localStorage.removeItem('minou-darts-saved-active-game');
-                      setSavedGameData(null);
-                    } catch (err) {
-                      console.error("Erreur lors de la reprise de la partie :", err);
-                    } finally {
-                      setIsSubmitting(false);
-                    }
-                  }}
-                >
-                  <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
-                    <RotateCcw className="w-24 h-24 text-green-500" />
-                  </div>
-                  <div className="flex items-center justify-between z-10">
-                    <h3 className="font-extrabold text-sm uppercase tracking-wider flex items-center gap-2 text-green-400">
-                      <RotateCcw className="w-5 h-5 text-green-400" />
-                      <span>Reprendre la partie en cours</span>
-                    </h3>
-                    <span className="text-[9px] bg-green-500 text-black font-black px-2 py-0.5 rounded uppercase tracking-wider animate-pulse">
-                      Actif
-                    </span>
-                  </div>
-                  
-                  <div className="text-xs text-zinc-300 z-10 space-y-1">
-                    <p>Mode : <strong className="text-white capitalize">{
-                      savedGameData.gameType === 'x01' ? `X01 (${savedGameData.targetScore})` : 
-                      savedGameData.gameType === 'clock' ? "Tour de l'horloge" :
-                      savedGameData.gameType
-                    }</strong></p>
-                    <p>Joueurs : <strong className="text-white">{savedGameData.players.map(p => p.name).join(', ')}</strong></p>
-                  </div>
-                  <div className="text-[10px] text-green-400/80 font-bold z-10 flex items-center gap-1 mt-1 group-hover:translate-x-1 transition-transform">
-                    <span>Cliquez ici pour reprendre la partie</span> &rarr;
-                  </div>
-                </div>
-              )}
+              {renderSavedGameBanner()}
 
               {/* Option 1 : X01 */}
               <div 
@@ -840,6 +964,25 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    <div 
+                      onClick={(e) => { e.stopPropagation(); setSelectedRandomOrder(!selectedRandomOrder); }}
+                      className="flex items-center justify-between bg-black/20 p-3 rounded-xl border border-theme-border/10 cursor-pointer hover:bg-black/40"
+                    >
+                      <span className="text-xs font-bold text-theme-text-primary">Premier serveur aléatoire</span>
+                      <button
+                        className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
+                          selectedRandomOrder ? 'bg-theme-accent' : 'bg-black/50 border border-theme-border/30'
+                        }`}
+                      >
+                        <div
+                          className={`w-4 h-4 rounded-full absolute top-1 transition-transform ${
+                            selectedRandomOrder ? 'translate-x-6 bg-black' : 'translate-x-1 bg-theme-text-secondary'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
                     {selectedPlayerNames.length !== 2 && (
                       <p className="text-[10px] text-red-400 font-semibold text-center mt-2 bg-red-500/10 rounded-lg p-2 border border-red-500/20">
                         Le mode Bart nécessite exactement 2 joueurs.
@@ -889,6 +1032,24 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
                         </span>
                       </div>
                     </div>
+
+                    <div 
+                      onClick={(e) => { e.stopPropagation(); setSelectedRandomOrder(!selectedRandomOrder); }}
+                      className="flex items-center justify-between bg-black/20 p-3 rounded-xl border border-theme-border/10 cursor-pointer hover:bg-black/40"
+                    >
+                      <span className="text-xs font-bold text-theme-text-primary">Ordre de jeu aléatoire</span>
+                      <button
+                        className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
+                          selectedRandomOrder ? 'bg-theme-accent' : 'bg-black/50 border border-theme-border/30'
+                        }`}
+                      >
+                        <div
+                          className={`w-4 h-4 rounded-full absolute top-1 transition-transform ${
+                            selectedRandomOrder ? 'translate-x-6 bg-black' : 'translate-x-1 bg-theme-text-secondary'
+                          }`}
+                        />
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -898,10 +1059,13 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
             <footer className="p-6 max-w-md mx-auto w-full">
               <button
                 onClick={handleStartGame}
-                disabled={isSubmitting}
-                className="w-full py-4 bg-theme-accent hover:bg-theme-accent-hover text-black font-black text-sm rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-50"
+                disabled={isSubmitting || (selectedGameType === 'bart' && selectedPlayerNames.length !== 2)}
+                className="w-full py-4 bg-theme-accent hover:bg-theme-accent-hover text-black font-black text-sm rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Play className="w-5 h-5 fill-current" /> ALLUMER LA CIBLE & COMMENCER
+                <Play className="w-5 h-5 fill-current" />
+                {selectedGameType === 'bart' && selectedPlayerNames.length !== 2
+                  ? 'SÉLECTIONNEZ EXACTEMENT 2 JOUEURS'
+                  : 'ALLUMER LA CIBLE & COMMENCER'}
               </button>
             </footer>
           </>

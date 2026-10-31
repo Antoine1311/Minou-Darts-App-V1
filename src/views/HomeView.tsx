@@ -261,7 +261,7 @@ export const HomeView: React.FC = () => {
             {/* Mode local */}
             <button
               onClick={() => {
-                window.location.hash = '#/remote';
+                window.location.hash = '#/remote?mode=local';
               }}
               className="py-2.5 px-3 bg-black/20 border border-theme-border/30 hover:border-theme-text-secondary/40 text-[10px] md:text-xs text-theme-text-secondary font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 hover:text-theme-text-primary cursor-pointer"
             >

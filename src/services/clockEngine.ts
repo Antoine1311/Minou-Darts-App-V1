@@ -195,14 +195,16 @@ export const clockEngine = {
     if (!player.currentRoundThrows) player.currentRoundThrows = [];
     if (player.currentRoundThrows.length > 0) {
       player.currentRoundThrows.pop();
-    } else {
+    } else if (state.throwsCount > 0) {
       // Si la liste est vide car on vient de remonter un tour, on reconstitue le tour précédent
       const recentThrows: string[] = [];
-      const startIndex = Math.floor((state.throwsCount - 1) / 3) * 3;
+      const startIndex = Math.max(0, Math.floor((state.throwsCount - 1) / 3) * 3);
       for (let i = startIndex; i < state.throwsCount; i++) {
         recentThrows.push(state.throwHistory[i] ? 'Touché' : 'Loupé');
       }
       player.currentRoundThrows = recentThrows;
+    } else {
+      player.currentRoundThrows = [];
     }
 
     return updatedRoom;

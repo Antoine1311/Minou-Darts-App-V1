@@ -1,6 +1,11 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager,
+  getFirestore 
+} from 'firebase/firestore';
 
 // Configuration Firebase utilisant les variables d'environnement Vite
 const firebaseConfig = {
@@ -16,8 +21,22 @@ const firebaseConfig = {
 // Initialiser Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialiser les services Auth et Firestore
+// Initialiser Auth
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// Initialiser Firestore avec persistance locale hors-ligne et support multi-onglets
+let firestoreDb;
+try {
+  firestoreDb = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
+  });
+} catch (e) {
+  console.warn("Échec d'initialisation du cache persistant Firestore, repli sur le cache standard:", e);
+  firestoreDb = getFirestore(app);
+}
+
+export const db = firestoreDb;
 
 export default app;

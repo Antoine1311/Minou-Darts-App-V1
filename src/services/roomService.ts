@@ -15,6 +15,8 @@ import { signInAnonymously } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { playerService } from './playerService';
 import type { ThemeType } from '../context/ThemeContext';
+import { calculateNextX01State } from './x01Engine';
+import { processCricketThrow } from './cricketEngine';
 
 /** Type de jeu : X01 (décompte), Cricket (fermeture de cibles), Bart (tennis) ou Clock (Tour de l'horloge) */
 export type GameType = 'x01' | 'cricket' | 'bart' | 'clock';
@@ -41,8 +43,11 @@ export interface Player {
   currentRoundThrows?: string[]; // Libellés des lancers du tour en cours
   roundBust?: boolean;          // Indique si le joueur a fait un bust dans ce tour
   bustsCount?: number;          // Nombre total de busts dans la partie X01
+  x01ThrowsHistory?: { points: number; isDouble: boolean; label: string }[]; // Historique détaillé des lancers X01 pour annulations déterministes
   // === Cricket spécifique ===
   cricketMarks?: Record<string, number>; // Marques par cible (ex: { "20": 3, "19": 1, "25": 0 })
+  cricketTotalMarks?: number;            // Nombre total exact de marques valides (fermetures + marques générant des points)
+  cricketCurrentRoundMarks?: number;     // Nombre de marques valides accumulées sur la volée en cours
   missedDarts?: number;                  // Nombre de fléchettes loupées
   accuracy?: number;                     // Précision globale (%)
   whiteRounds?: number;                  // Nombre de tours à 0 marques
@@ -83,9 +88,11 @@ export interface CalibrationSettings {
   rTripleInner: number;
   rBullOuter: number;
   rBullInner: number;
+  rotationAngle?: number; // Rotation fine de la cible en degrés (-15° à +15°)
   haloWhiteRadius?: number;
   haloMaxRadius?: number;
   arShowExtraOverlays?: boolean;
+  arNumbersPosition?: 'inside' | 'outside' | 'hidden'; // Position des numéros 1-20 projetés en mode AR
   statsPanelY?: number;
   statsPanelX?: number;
   statsFontSize?: number;
@@ -94,6 +101,15 @@ export interface CalibrationSettings {
   statsFontScaleY?: number;
   statsPanelWidth?: number;
   statsPanelHeight?: number;
+}
+
+export interface LastCompletedRound {
+  roundId: string;
+  playerIndex: number;
+  playerName: string;
+  throws: string[];
+  score: number;
+  isBust: boolean;
 }
 
 export interface RoomData {
@@ -108,6 +124,7 @@ export interface RoomData {
   bartConfig?: {
     setsToWin: number;
     serverIndex: number;
+    tieBreakStartServerIndex?: number;    // Mémorise le 1er serveur du tie-break pour l'alternance du set suivant
     currentTarget?: {
       number: number | 'bull';
       zone: 'inner' | 'outer';
@@ -128,12 +145,19 @@ export interface RoomData {
   createdAt: any;
   creatorId: string;
   winnerName?: string;
+  statsRecorded?: boolean;                // Évite le double comptage des statistiques Cloud en cas d'annulation après victoire
+  lastCompletedRound?: LastCompletedRound | null; // Dernière volée achevée pour déclencher les animations AR du vidéoprojecteur
   lastUpdate?: any;
   projectorMode?: 'classic' | 'fullscreen' | 'ar'; // Mode de vue du projecteur, synchronisé en temps réel
+  targetPosition?: 'left' | 'right'; // Disposition vidéoprojecteur : 'left' (cible à gauche, scores à droite) ou 'right' (cible à droite, scores à gauche)
   calibration?: CalibrationSettings; // Paramètres de calibrage de la cible en Réalité Augmentée
   isCalibrating?: boolean; // Indique si la calibration est en cours (pour synchroniser l'affichage de la cible avec la télécommande)
+  calibrationStep?: number; // Étape active de calibrage (1: Centre, 2: Rayon, 3: Rotation & Test, 8: Dégradé, 9: Commentaires)
+  calibrationSubMode?: 'laser' | 'white'; // Mode visuel de calibration ('laser' = mire néon sur fond sombre, 'white' = fond blanc)
+  calibrationTestHit?: { region: string; score: number; segmentId: string; timestamp: number } | null; // Test d'impact depuis la télécommande
   clockConfig?: {
     includeBull: boolean;
+    mode?: 'standard' | 'double' | 'triple';
   };
 }
 
@@ -147,18 +171,67 @@ const generateRoomId = (): string => {
   return result;
 };
 
+const computePlayerStatsPayload = (room: RoomData, p: Player) => {
+  const won = p.name === room.winnerName;
+  let points = 0;
+  if (room.gameType === 'x01') {
+    points = p.totalPoints || 0;
+  } else if (room.gameType === 'cricket' && room.cricketScoringMode !== 'cutthroat') {
+    points = p.totalPoints || 0;
+  }
+  const darts = room.gameType === 'clock'
+    ? (p.clockState?.throwsCount ?? p.throwsCount ?? 0)
+    : (p.throwsCount || 0);
+  return { won, points, darts };
+};
+
 export const roomService = {
   /**
-   * Crée une nouvelle partie (salon) dans Firestore
+   * Enregistre les statistiques de fin de match pour tous les joueurs ayant un profil Cloud
+   */
+  recordMatchStats: (room: RoomData): void => {
+    for (const p of room.players || []) {
+      if (p.globalId && !p.globalId.startsWith('local-player-')) {
+        const { won, points, darts } = computePlayerStatsPayload(room, p);
+        playerService.updatePlayerStats(p.globalId, won, points, darts).catch(console.error);
+      }
+    }
+  },
+
+  /**
+   * Annule l'enregistrement des statistiques de fin de match si le dernier coup gagnant est annulé (Undo)
+   */
+  revertMatchStats: (room: RoomData): void => {
+    if (!room.statsRecorded) return;
+    for (const p of room.players || []) {
+      if (p.globalId && !p.globalId.startsWith('local-player-')) {
+        const { won, points, darts } = computePlayerStatsPayload(room, p);
+        playerService.revertPlayerStats(p.globalId, won, points, darts).catch(console.error);
+      }
+    }
+  },
+
+  /**
+   * Crée une nouvelle partie (salon) dans Firestore sans écraser une éventuelle session Google ni un salon existant
    */
   createRoom: async (theme: ThemeType, targetScore: number = 501, gameType: GameType = 'x01'): Promise<string> => {
-    // S'authentifier anonymement d'abord
-    const userCredential = await signInAnonymously(auth);
-    const creatorId = userCredential.user.uid;
+    // Conserver l'utilisateur connecté (ex: compte Google) ou basculer en anonyme si non authentifié
+    let creatorId = auth.currentUser?.uid;
+    if (!creatorId) {
+      const userCredential = await signInAnonymously(auth);
+      creatorId = userCredential.user.uid;
+    }
 
-    const roomId = generateRoomId();
-    const roomRef = doc(db, 'rooms', roomId);
-    
+    // Générer un code à 4 caractères libre (jusqu'à 5 tentatives pour éviter toute collision)
+    let roomId = generateRoomId();
+    let roomRef = doc(db, 'rooms', roomId);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const existingSnap = await getDoc(roomRef);
+      if (!existingSnap.exists()) break;
+      roomId = generateRoomId();
+      roomRef = doc(db, 'rooms', roomId);
+    }
+
     const initialRoom: RoomData = {
       roomId,
       theme,
@@ -183,8 +256,10 @@ export const roomService = {
   checkRoomExists: async (roomId: string): Promise<boolean> => {
     if (!roomId || roomId.length !== 4) return false;
     
-    // S'authentifier pour pouvoir lire/écrire
-    await signInAnonymously(auth);
+    // S'authentifier anonymement uniquement si aucune session active n'est présente
+    if (!auth.currentUser) {
+      await signInAnonymously(auth);
+    }
     
     const roomRef = doc(db, 'rooms', roomId.toUpperCase());
     const docSnap = await getDoc(roomRef);
@@ -223,26 +298,22 @@ export const roomService = {
    * Enregistre un lancer de fléchette pour le joueur actif et calcule les scores
    */
   recordThrow: async (roomId: string, room: RoomData, points: number, isDouble: boolean = false, throwLabel?: string): Promise<void> => {
-    const { calculateNextX01State } = await import('./x01Engine');
     const nextRoomState = calculateNextX01State(room, points, isDouble, throwLabel);
+    const justFinished = !room.statsRecorded && room.status !== 'finished' && nextRoomState.status === 'finished';
 
     // Sauvegarder dans Firestore
     await roomService.updateRoom(roomId, {
       players: nextRoomState.players,
       activePlayerIndex: nextRoomState.activePlayerIndex,
       status: nextRoomState.status,
-      winnerName: nextRoomState.winnerName
+      winnerName: nextRoomState.winnerName,
+      lastCompletedRound: nextRoomState.lastCompletedRound ?? null,
+      ...(justFinished ? { statsRecorded: true } : {})
     });
 
-    // Si la partie vient de se terminer, on met à jour les statistiques de tous les joueurs
-    if (room.status !== 'finished' && nextRoomState.status === 'finished') {
-      for (const p of nextRoomState.players) {
-        if (p.globalId) {
-          const won = p.name === nextRoomState.winnerName;
-          // Ignorer l'attente pour ne pas bloquer l'UI
-          playerService.updatePlayerStats(p.globalId, won, p.totalPoints, p.throwsCount).catch(console.error);
-        }
-      }
+    // Si la partie vient de se terminer, on met à jour les statistiques de tous les joueurs une seule fois
+    if (justFinished) {
+      roomService.recordMatchStats(nextRoomState);
     }
   },
 
@@ -251,20 +322,17 @@ export const roomService = {
    * Délègue la logique métier au cricketEngine.
    */
   recordCricketThrow: async (roomId: string, room: RoomData, baseNumber: number, multiplier: number): Promise<void> => {
-    const { processCricketThrow } = await import('./cricketEngine');
     const { updatedRoom } = processCricketThrow(room, baseNumber, multiplier);
-    
-    await roomService.updateRoom(roomId, updatedRoom);
+    const justFinished = !room.statsRecorded && room.status !== 'finished' && updatedRoom.status === 'finished';
 
-    // Si la partie vient de se terminer, on met à jour les statistiques de tous les joueurs
-    if (room.status !== 'finished' && updatedRoom.status === 'finished' && updatedRoom.players) {
-      for (const p of updatedRoom.players) {
-        if (p.globalId) {
-          const won = p.name === updatedRoom.winnerName;
-          // Ignorer l'attente pour ne pas bloquer l'UI
-          playerService.updatePlayerStats(p.globalId, won, p.totalPoints, p.throwsCount).catch(console.error);
-        }
-      }
+    await roomService.updateRoom(roomId, {
+      ...updatedRoom,
+      ...(justFinished ? { statsRecorded: true } : {})
+    });
+
+    // Si la partie vient de se terminer, on met à jour les statistiques de tous les joueurs une seule fois
+    if (justFinished && updatedRoom.players) {
+      roomService.recordMatchStats({ ...room, ...updatedRoom } as RoomData);
     }
   },
 
@@ -384,6 +452,60 @@ export function getGameHighlights(room: RoomData): string[] {
         }
       }
     });
+
+  } else if (room.gameType === 'clock') {
+    // === Highlights pour le Tour de l'Horloge ===
+    const includeBull = room.clockConfig?.includeBull ?? true;
+    const totalTargets = includeBull ? 21 : 20;
+
+    if (room.winnerName) {
+      const winner = players.find(p => p.name === room.winnerName);
+      const wThrows = winner?.clockState?.throwsCount ?? winner?.throwsCount ?? 0;
+      if (winner && wThrows > 0) {
+        highlights.push(`⏱️ **Maître du temps** : **${winner.name}** a validé les **${totalTargets}** cibles de l'horloge en **${wThrows}** fléchettes !`);
+      }
+    }
+
+    // Meilleure série consécutive de cibles touchées
+    let bestStreak = 0;
+    let bestStreakPlayer = '';
+    let bestAcc = 0;
+    let bestAccPlayer = '';
+
+    players.forEach(p => {
+      const state = p.clockState;
+      if (!state) return;
+
+      let currentStreak = 0;
+      let playerMaxStreak = 0;
+      (state.throwHistory || []).forEach(hit => {
+        if (hit) {
+          currentStreak += 1;
+          if (currentStreak > playerMaxStreak) playerMaxStreak = currentStreak;
+        } else {
+          currentStreak = 0;
+        }
+      });
+
+      if (playerMaxStreak > bestStreak) {
+        bestStreak = playerMaxStreak;
+        bestStreakPlayer = p.name;
+      }
+
+      if (state.throwsCount >= 3 && state.accuracy > bestAcc) {
+        bestAcc = state.accuracy;
+        bestAccPlayer = p.name;
+      }
+    });
+
+    if (bestStreak >= 3 && bestStreakPlayer) {
+      highlights.push(`🔥 **Série brûlante** : **${bestStreakPlayer}** a enchaîné **${bestStreak}** cibles touchées d'affilée sans trembler !`);
+    }
+
+    if (bestAccPlayer) {
+      const formattedAcc = bestAcc.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      highlights.push(`🎯 **Précision horlogère** : **${bestAccPlayer}** signe la meilleure réussite avec **${formattedAcc} %** de tirs au but.`);
+    }
 
   } else if (!isCricket) {
     // === Highlights pour X01 ===

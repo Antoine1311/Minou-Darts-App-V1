@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Tv, Target, XCircle, Award, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Tv, Target, XCircle, Award, RotateCcw, Settings } from 'lucide-react';
 import type { RoomData } from '../services/roomService';
 import { roomService } from '../services/roomService';
 import { processBartTargetSelection, processBartResolution, undoBartAction } from '../services/bartEngine';
@@ -40,6 +40,7 @@ interface BartRemoteGameProps {
   roomId: string | null;
   setShowProjectionModal: (show: boolean) => void;
   onExitTrigger: () => void;
+  onOpenProjectorSettings?: () => void;
 }
 
 export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
@@ -48,7 +49,8 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
   setLocalRoom,
   roomId,
   setShowProjectionModal,
-  onExitTrigger
+  onExitTrigger,
+  onOpenProjectorSettings
 }) => {
   const [selectedNumber, setSelectedNumber] = useState<number | 'bull' | null>(null);
   const [selectedZone, setSelectedZone] = useState<'inner' | 'outer' | null>(null);
@@ -115,10 +117,17 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
     setIsSubmitting(true);
     try {
       const updatedRoom = processBartResolution(room, resolution);
+      const justFinished = !room.statsRecorded && room.status !== 'finished' && updatedRoom.status === 'finished';
+      if (justFinished) {
+        updatedRoom.statsRecorded = true;
+      }
       if (isLocalMode) {
         setLocalRoom(updatedRoom);
       } else if (roomId) {
         await roomService.updateRoom(roomId, updatedRoom);
+        if (justFinished) {
+          roomService.recordMatchStats(updatedRoom);
+        }
       }
       setError(null);
     } catch (err) {
@@ -164,7 +173,7 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
           </h1>
         </div>
         
-        <div className="flex items-center gap-4 text-theme-accent">
+        <div className="flex items-center gap-2 text-theme-accent">
           {bartConfig.historyStates && bartConfig.historyStates.length > 0 && (
             <button 
               onClick={handleUndo} 
@@ -183,6 +192,15 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
             >
               <Tv className="w-4 h-4 stroke-[2.5] text-theme-accent" />
               <span className="text-[9px] font-black text-theme-accent uppercase tracking-wider">Sync</span>
+            </button>
+          )}
+          {onOpenProjectorSettings && (
+            <button
+              onClick={onOpenProjectorSettings}
+              title="Paramètres du projecteur"
+              className="p-1.5 bg-zinc-900/80 border border-zinc-800/80 hover:border-theme-accent/60 hover:bg-zinc-800 text-zinc-500 hover:text-theme-accent rounded-lg transition-all cursor-pointer"
+            >
+              <Settings className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -281,9 +299,6 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
                 
                 const rInnerZoneOuter = rMiddle; // Fin de la zone intérieure
                 const rOuterZoneOuter = radius;  // Fin de la zone extérieure
-
-                // Le point de séparation est à environ 60% du rayon total
-                const boundaryPercent = Math.round((rInnerZoneOuter / radius) * 100);
 
                 const segments: React.ReactNode[] = [];
                 const texts: React.ReactNode[] = [];
@@ -427,7 +442,8 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
                     >
                       {num}
                     </button>
-                  ))}\n                  <button
+                  ))}
+                  <button
                     onClick={() => setSelectedNumber('bull')}
                     className={`col-span-5 py-2.5 rounded-lg font-black text-sm transition-all border-2 uppercase tracking-widest ${
                       selectedNumber === 'bull'

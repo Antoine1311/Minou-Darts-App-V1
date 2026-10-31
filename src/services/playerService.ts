@@ -119,5 +119,33 @@ export const playerService = {
     } catch (e) {
       console.error("Erreur lors de la mise à jour des statistiques du joueur:", e);
     }
+  },
+
+  /**
+   * Annule l'enregistrement des statistiques d'une fin de partie lorsqu'un joueur corrige/annule le dernier coup victorieux
+   */
+  revertPlayerStats: async (playerId: string, won: boolean, points: number, darts: number): Promise<void> => {
+    if (!playerId || playerId.startsWith('local-player-')) return;
+
+    const playerRef = doc(db, 'players', playerId);
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const playerDoc = await transaction.get(playerRef);
+        if (!playerDoc.exists()) return;
+
+        const data = playerDoc.data();
+        const currentStats = data.stats || { gamesPlayed: 0, wins: 0, totalPoints: 0, dartsThrown: 0 };
+
+        transaction.update(playerRef, {
+          "stats.gamesPlayed": Math.max(0, currentStats.gamesPlayed - 1),
+          "stats.wins": won ? Math.max(0, currentStats.wins - 1) : currentStats.wins,
+          "stats.totalPoints": Math.max(0, currentStats.totalPoints - points),
+          "stats.dartsThrown": Math.max(0, currentStats.dartsThrown - darts)
+        });
+      });
+    } catch (e) {
+      console.error("Erreur lors de l'annulation des statistiques du joueur:", e);
+    }
   }
 };

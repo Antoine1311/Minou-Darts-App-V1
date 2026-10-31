@@ -50,11 +50,18 @@ export const ClockRemoteGame: React.FC<ClockRemoteGameProps> = ({
 
     try {
       const updatedRoom = clockEngine.processClockThrow(room, hit);
+      const justFinished = !room.statsRecorded && room.status !== 'finished' && updatedRoom.status === 'finished';
+      if (justFinished) {
+        updatedRoom.statsRecorded = true;
+      }
       
       if (isLocalMode) {
         setLocalRoom(updatedRoom);
       } else if (roomId) {
         await roomService.updateRoom(roomId, updatedRoom);
+        if (justFinished) {
+          roomService.recordMatchStats(updatedRoom);
+        }
       }
     } catch (err) {
       console.error("Erreur lors de l'enregistrement du lancer :", err);
@@ -259,12 +266,12 @@ export const ClockRemoteGame: React.FC<ClockRemoteGameProps> = ({
                   const pState = p.clockState || { currentTarget: 1, throwsCount: 0 };
                   const targetLabel = pState.currentTarget === 25 ? 'BULL' : String(pState.currentTarget);
                   
-                  // Calculer le pourcentage de progression (1 à 20 ou 25)
-                  const maxTarget = includeBull ? 25 : 20;
-                  // Si target est 25, la progression est 20 segments + 1 bulle = 21 étapes.
-                  // Mais pour simplifier, c'est le numéro actuel visé.
-                  const progressValue = pState.currentTarget === 25 ? 20 : (pState.currentTarget - 1);
-                  const progressPercent = Math.min(100, Math.round((progressValue / maxTarget) * 100));
+                  // Calculer le pourcentage exact de progression (20 étapes ou 21 avec la Bulle)
+                  const totalSteps = includeBull ? 21 : 20;
+                  const completedSteps = (room.status === 'finished' && p.name === room.winnerName)
+                    ? totalSteps
+                    : (pState.currentTarget === 25 ? 20 : Math.max(0, pState.currentTarget - 1));
+                  const progressPercent = Math.min(100, Math.round((completedSteps / totalSteps) * 100));
 
                   return (
                     <div 

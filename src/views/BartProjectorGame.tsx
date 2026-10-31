@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Tv, Maximize2, Sparkles, Eye, Settings } from 'lucide-react';
+import { Zap, Tv, Maximize2, Sparkles, Eye, Settings, ArrowLeftRight } from 'lucide-react';
 import type { RoomData, Player, CalibrationSettings } from '../services/roomService';
 
 interface BartProjectorGameProps {
   room: RoomData;
   projectorMode: 'classic' | 'fullscreen' | 'ar';
   setProjectorMode: (mode: 'classic' | 'fullscreen' | 'ar') => void;
+  targetPosition?: 'left' | 'right';
+  setTargetPosition?: (pos: 'left' | 'right') => void;
   showModeSelector: boolean;
   setShowModeSelector: (show: boolean) => void;
-  renderCalibratedDartboard: (isCalibrationMode: boolean) => React.ReactNode;
+  renderCalibratedDartboard: (isCalibrationMode: boolean, extraSvgOverlays?: React.ReactNode) => React.ReactNode;
   calibration?: CalibrationSettings;
   isCalibrating: boolean;
   setIsCalibrating: (cal: boolean) => void;
@@ -22,6 +24,8 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
   room,
   projectorMode,
   setProjectorMode,
+  targetPosition = 'left',
+  setTargetPosition,
   showModeSelector,
   setShowModeSelector,
   renderCalibratedDartboard,
@@ -148,14 +152,16 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
   const currentServer = players[bartConfig.serverIndex];
 
   return (
-    <div className="w-full h-full flex m-0 p-0 overflow-hidden bg-black select-none font-sans">
+    <div className={`w-full h-full flex ${targetPosition === 'right' ? 'flex-row-reverse' : 'flex-row'} m-0 p-0 overflow-hidden bg-black select-none relative font-sans text-white`}>
       
-      {/* MOITIÉ GAUCHE : Cible et Grosse Target (conditionnée par projectorMode) */}
+      {/* Cible et Grosse Target (conditionnée par projectorMode) */}
       {projectorMode !== 'fullscreen' && (
         <div 
-          className={`w-1/2 h-full transition-all duration-500 shadow-[20px_0_40px_rgba(255,255,255,0.15)] z-10 relative overflow-hidden ${
+          className={`w-1/2 h-full transition-all duration-500 ${
+            targetPosition === 'right' ? 'shadow-[-20px_0_40px_rgba(255,255,255,0.15)]' : 'shadow-[20px_0_40px_rgba(255,255,255,0.15)]'
+          } z-10 relative overflow-hidden ${
             projectorMode === 'ar' 
-              ? isCalibrating
+              ? isCalibrating && room.calibrationSubMode === 'white'
                 ? 'bg-white flex items-center justify-center p-0'
                 : 'bg-black flex items-center justify-center p-0'
               : 'bg-white flex flex-col justify-end items-center pb-6'
@@ -448,8 +454,10 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
         </div>
       )}
 
-      {/* MOITIÉ DROITE : Interface Sombre (Score Tennis) ou Calibration */}
-      <div className={`${projectorMode === 'fullscreen' ? 'w-full' : 'w-1/2'} h-full bg-theme-bg text-theme-text-primary p-5 flex flex-col justify-between relative border-l border-theme-border/30`}>
+      {/* Interface Sombre (Score Tennis) ou Calibration */}
+      <div className={`${projectorMode === 'fullscreen' ? 'w-full' : 'w-1/2'} h-full bg-theme-bg text-theme-text-primary p-5 flex flex-col justify-between relative ${
+        targetPosition === 'right' ? 'border-r' : 'border-l'
+      } border-theme-border/30`}>
         {isCalibrating ? (
           renderProjectorCalibrationInterface()
         ) : (
@@ -537,12 +545,15 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
               const p2 = players[1];
               const isTieBreak = bartConfig.isTieBreak;
 
-              // Helper: Check if a player is 1 point away from winning a game
+              // Vérifier si un joueur est à 1 seul point du gain du jeu (à 40-40, personne n'a balle de jeu)
               const isGamePoint = (p: typeof p1, opp: typeof p1) => {
                 if (isTieBreak) {
                   return p.bartState!.tieBreakPoints >= 6 && (p.bartState!.tieBreakPoints - opp.bartState!.tieBreakPoints >= 1);
                 } else {
-                  return (p.bartState!.currentPoints === 40 && opp.bartState!.currentPoints !== 'ADV') || p.bartState!.currentPoints === 'ADV';
+                  return (
+                    (p.bartState!.currentPoints === 40 && opp.bartState!.currentPoints !== 40 && opp.bartState!.currentPoints !== 'ADV') ||
+                    p.bartState!.currentPoints === 'ADV'
+                  );
                 }
               };
 
@@ -678,69 +689,6 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
             JEU BART &bull; METRIC PWA
           </div>
         </div>
-
-        {/* Bouton de sélection de mode de vue et popup (en bas à droite) */}
-        <div className="absolute bottom-4 right-4 z-50 flex flex-col items-end gap-2">
-          {showModeSelector && (
-            <div className="bg-zinc-950/95 border border-theme-border/50 rounded-2xl p-2.5 shadow-2xl backdrop-blur-md w-56 flex flex-col gap-1 text-xs text-white">
-              <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest px-2 py-1">
-                Mode d'affichage
-              </span>
-              <button 
-                onClick={() => { setProjectorMode('classic'); setShowModeSelector(false); }}
-                className={`w-full flex items-center justify-between p-2 rounded-xl text-left font-bold transition-all ${
-                  projectorMode === 'classic' 
-                    ? 'bg-theme-accent text-black font-extrabold shadow-md' 
-                    : 'hover:bg-zinc-900 text-zinc-350 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Tv className="w-4 h-4" />
-                  <span>Vue Classique</span>
-                </div>
-                {projectorMode === 'classic' && <span className="text-[9px] uppercase tracking-wider font-black">Actif</span>}
-              </button>
-
-              <button 
-                onClick={() => { setProjectorMode('fullscreen'); setShowModeSelector(false); }}
-                className={`w-full flex items-center justify-between p-2 rounded-xl text-left font-bold transition-all ${
-                  projectorMode === 'fullscreen' 
-                    ? 'bg-theme-accent text-black font-extrabold shadow-md' 
-                    : 'hover:bg-zinc-900 text-zinc-350 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Maximize2 className="w-4 h-4" />
-                  <span>Plein Écran</span>
-                </div>
-                {projectorMode === 'fullscreen' && <span className="text-[9px] uppercase tracking-wider font-black">Actif</span>}
-              </button>
-
-              <button 
-                onClick={() => { setProjectorMode('ar'); setShowModeSelector(false); }}
-                className={`w-full flex items-center justify-between p-2 rounded-xl text-left font-bold transition-all ${
-                  projectorMode === 'ar' 
-                    ? 'bg-theme-accent text-black font-extrabold shadow-md' 
-                    : 'hover:bg-zinc-900 text-zinc-350 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" />
-                  <span>Réalité Augmentée</span>
-                </div>
-                {projectorMode === 'ar' && <span className="text-[9px] uppercase tracking-wider font-black">Actif</span>}
-              </button>
-            </div>
-          )}
-
-          <button
-            onClick={() => setShowModeSelector(!showModeSelector)}
-            className="p-3.5 bg-zinc-900/90 border border-theme-border/50 text-theme-accent rounded-full hover:scale-105 transition-all shadow-xl hover:bg-zinc-950 flex items-center justify-center"
-            title="Changer de vue"
-          >
-            <Eye className="w-5 h-5" />
-          </button>
-        </div>
       </>
     )}
   </div>
@@ -773,8 +721,8 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
           animation: fadeInOut 4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
       `}} />
-      {/* Bouton de sélection de mode de vue et popup (en bas à droite) */}
-      <div className="absolute bottom-4 right-4 z-50 flex flex-col items-end gap-2">
+      {/* Bouton de sélection de mode de vue et popup */}
+      <div className={`absolute bottom-4 ${targetPosition === 'right' ? 'left-4 items-start' : 'right-4 items-end'} z-50 flex flex-col gap-2`}>
         {showModeSelector && (
           <div className="bg-zinc-950/95 border border-theme-border/50 rounded-2xl p-2.5 shadow-2xl backdrop-blur-md w-56 flex flex-col gap-1 text-xs text-white">
             <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest px-2 py-1">
@@ -824,12 +772,37 @@ export const BartProjectorGame: React.FC<BartProjectorGameProps> = ({
               </div>
               {projectorMode === 'ar' && <span className="text-[9px] uppercase tracking-wider font-black">Actif</span>}
             </button>
+
+            {/* Inversion de côté Cible / Scores */}
+            {projectorMode !== 'fullscreen' && setTargetPosition && (
+              <>
+                <div className="border-t border-zinc-800 my-1" />
+                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest px-2 py-1">
+                  Position de la cible
+                </span>
+                <button
+                  onClick={() => {
+                    setTargetPosition(targetPosition === 'left' ? 'right' : 'left');
+                    setShowModeSelector(false);
+                  }}
+                  className="w-full flex items-center justify-between p-2 rounded-xl text-left font-bold transition-all hover:bg-zinc-900 text-zinc-350 hover:text-white cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <ArrowLeftRight className="w-4 h-4 text-theme-accent" />
+                    <span>{targetPosition === 'left' ? 'Cible à droite' : 'Cible à gauche'}</span>
+                  </div>
+                  <span className="text-[9px] uppercase tracking-wider font-bold text-zinc-400">
+                    {targetPosition === 'left' ? 'Gauche' : 'Droite'}
+                  </span>
+                </button>
+              </>
+            )}
           </div>
         )}
 
         <button
           onClick={() => setShowModeSelector(!showModeSelector)}
-          className="p-3.5 bg-zinc-900/90 border border-theme-border/50 text-theme-accent rounded-full hover:scale-105 transition-all shadow-xl hover:bg-zinc-950 flex items-center justify-center"
+          className="p-3.5 bg-zinc-900/90 border border-theme-border/50 text-theme-accent rounded-full hover:scale-105 transition-all shadow-xl hover:bg-zinc-950 flex items-center justify-center cursor-pointer"
           title="Changer de vue"
         >
           <Eye className="w-5 h-5" />

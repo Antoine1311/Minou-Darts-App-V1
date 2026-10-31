@@ -1,23 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { RemoteFinishedPhase } from './RemoteFinishedPhase';
 import { CricketRemoteGame } from './CricketRemoteGame';
 import { X01RemoteGame } from './X01RemoteGame';
 import { RemoteProjectorSettings } from './RemoteProjectorSettings';
 import { RemoteSetupPhase } from './RemoteSetupPhase';
 import { useTheme } from '../context/ThemeContext';
-import { X, ArrowLeft, Play, RotateCcw, Check, Plus, Trash2, Smartphone, Users, Target, Crosshair, Tv, Copy, ExternalLink, Loader2, Settings, Sparkles, Maximize2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Clock, Trophy, AlertCircle, User } from 'lucide-react';
-import { roomService, getGameHighlights } from '../services/roomService';
+import { X, ArrowLeft, RotateCcw, Check, Smartphone, Users, Target, Tv, Copy, ExternalLink, Loader2, Sparkles, Maximize2 } from 'lucide-react';
+import { roomService } from '../services/roomService';
 import { useAuth } from '../context/AuthContext';
-import type { RoomData, GameType, CricketVariant, CalibrationSettings } from '../services/roomService';
-import { generateCricketTargets, createEmptyMarks, processCricketThrow } from '../services/cricketEngine';
-import { createEmptyBartState } from '../services/bartEngine';
+import type { RoomData, CalibrationSettings } from '../services/roomService';
+import { undoCricketThrow } from '../services/cricketEngine';
 import { BartRemoteGame } from './BartRemoteGame';
 import { ClockRemoteGame } from './ClockRemoteGame';
-import { getCheckoutSuggestion } from '../services/checkoutSuggestions';
-import { playerService } from '../services/playerService';
-import type { GlobalPlayer } from '../services/playerService';
 import { useGameStore } from '../store/gameStore';
-// Helpers moved to X01RemoteGame.tsx
 
 
 export const RemoteView: React.FC = () => {
@@ -31,8 +27,6 @@ export const RemoteView: React.FC = () => {
   const currentRoom = useGameStore(state => state.localRoom);
   const setLocalRoom = useGameStore(state => state.setLocalRoom);
   const syncFromFirebase = useGameStore(state => state.syncFromFirebase);
-  const recordThrowX01 = useGameStore(state => state.recordThrowX01);
-  const undoX01 = useGameStore(state => state.undoX01);
 
   // Rétrocompatibilité temporaire pendant le découpage
   const room = currentRoom;
@@ -43,6 +37,26 @@ export const RemoteView: React.FC = () => {
 
   // Mode local (sans salon connecté)
   const [isLocalMode, setIsLocalMode] = useState<boolean>(false);
+  // Étape initiale d'ouverture du lobby ('players' ou 'game')
+  const [initialSetupStep, setInitialSetupStep] = useState<'players' | 'game'>('players');
+
+  const initLocalRoom = () => {
+    setIsLocalMode(true);
+    setRoomId('LOCAL');
+    setLocalRoom({
+      roomId: 'LOCAL',
+      theme: 'modern',
+      gameType: 'x01',
+      targetScore: 501,
+      doubleOut: false,
+      cricketScoringMode: 'standard',
+      activePlayerIndex: 0,
+      status: 'setup',
+      players: [],
+      createdAt: new Date(),
+      creatorId: 'local-user'
+    });
+  };
 
   // Joueurs et scores (déclarés au début pour respecter les règles des hooks de React)
   const players = currentRoom?.players || [];
@@ -73,6 +87,13 @@ export const RemoteView: React.FC = () => {
     return 'classic';
   });
 
+  // Disposition de l'écran du projecteur (cible à gauche ou à droite)
+  const [remoteTargetPosition, setRemoteTargetPosition] = useState<'left' | 'right'>(() => {
+    const saved = localStorage.getItem('minou_dart_target_position');
+    if (saved === 'left' || saved === 'right') return saved;
+    return 'left';
+  });
+
   // --- États pour la calibration depuis la télécommande ---
   const DEFAULT_RADIUS_REMOTE = 350;
   const DEFAULT_CALIBRATION_REMOTE: CalibrationSettings = {
@@ -83,9 +104,11 @@ export const RemoteView: React.FC = () => {
     rTripleOuter: DEFAULT_RADIUS_REMOTE * (107 / 170),
     rDoubleInner: DEFAULT_RADIUS_REMOTE * (162 / 170),
     rDoubleOuter: DEFAULT_RADIUS_REMOTE * 1.0,
+    rotationAngle: 0,
     haloWhiteRadius: DEFAULT_RADIUS_REMOTE * 1.1,
     haloMaxRadius: DEFAULT_RADIUS_REMOTE * 2.5,
     arShowExtraOverlays: true,
+    arNumbersPosition: 'inside',
     statsFontSize: 16,
     commentsFontSize: 18,
     statsFontScaleX: 1.0,
@@ -96,7 +119,12 @@ export const RemoteView: React.FC = () => {
     if (saved) { try { return JSON.parse(saved); } catch (_) {} }
     return DEFAULT_CALIBRATION_REMOTE;
   });
+  const remoteCalibrationRef = React.useRef<CalibrationSettings>(remoteCalibration);
   const [remoteCalibrationStep, setRemoteCalibrationStep] = useState<number>(1);
+  const [remoteCalibrationSubMode, setRemoteCalibrationSubMode] = useState<'laser' | 'white'>(() => {
+    const saved = localStorage.getItem('minou_dart_calibration_submode');
+    return (saved === 'white' || saved === 'laser') ? saved : 'laser';
+  });
   const [linkCopied, setLinkCopied] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [multiplier, setMultiplier] = useState<'S' | 'D' | 'T'>('S');
@@ -115,6 +143,7 @@ export const RemoteView: React.FC = () => {
 
   // Sauvegarder la calibration en localStorage (le Projecteur l'écoutera via storage event) et Firestore (avec debounce)
   const saveRemoteCalibration = (newCal: CalibrationSettings, forceSync: boolean = false) => {
+    remoteCalibrationRef.current = newCal;
     setRemoteCalibration(newCal);
     localStorage.setItem('minou_dart_calibration', JSON.stringify(newCal));
 
@@ -131,7 +160,7 @@ export const RemoteView: React.FC = () => {
           roomService.updateRoom(roomId, { calibration: newCal }).catch(err =>
             console.error('Erreur sync calibration Firestore:', err)
           );
-        }, 150);
+        }, 120);
       }
     }
   };
@@ -149,13 +178,48 @@ export const RemoteView: React.FC = () => {
     }
   };
 
-  // Ajustement de calibration (logique identique au ProjectorView)
-  const adjustRemoteCalibration = (type: 'move-x' | 'move-y' | 'scale-step' | 'stats-move-x' | 'stats-move-y', delta: number, forceSync: boolean = false) => {
-    const newCal = { ...remoteCalibration };
+  // Changer la disposition de la cible (cible à gauche ou à droite)
+  const setRemoteTargetPositionAndSync = (pos: 'left' | 'right') => {
+    setRemoteTargetPosition(pos);
+    localStorage.setItem('minou_dart_target_position', pos);
+    if (!isLocalMode && roomId) {
+      roomService.updateRoom(roomId, { targetPosition: pos }).catch(err =>
+        console.error('Erreur sync position cible Firestore:', err)
+      );
+    }
+  };
+
+  // Changer l'étape de calibration avec synchronisation vers le projecteur
+  const changeRemoteCalibrationStep = (step: number) => {
+    setRemoteCalibrationStep(step);
+    localStorage.setItem('minou_dart_calibration_step', String(step));
+    updateRoomState({ calibrationStep: step });
+  };
+
+  // Basculer le mode visuel de calibration (laser ou fond blanc)
+  const toggleRemoteCalibrationSubMode = () => {
+    const next = remoteCalibrationSubMode === 'laser' ? 'white' : 'laser';
+    setRemoteCalibrationSubMode(next);
+    localStorage.setItem('minou_dart_calibration_submode', next);
+    updateRoomState({ calibrationSubMode: next });
+  };
+
+  // Déclencher un test d'alignement rapide sur une zone précise
+  const triggerRemoteTestHit = (region: string, score: number, segmentId: string) => {
+    updateRoomState({
+      calibrationTestHit: { region, score, segmentId, timestamp: Date.now() }
+    });
+  };
+
+  // Ajustement de calibration (lecture sur remoteCalibrationRef pour cumuler les mouvements diagonaux X + Y sans écrasement)
+  const adjustRemoteCalibration = (type: 'move-x' | 'move-y' | 'scale-step' | 'stats-move-x' | 'stats-move-y' | 'rotate', delta: number, forceSync: boolean = false) => {
+    const newCal = { ...remoteCalibrationRef.current };
     if (type === 'move-x') {
       newCal.centerX = Math.max(0, Math.min(1000, newCal.centerX + delta));
     } else if (type === 'move-y') {
       newCal.centerY = Math.max(0, Math.min(1000, newCal.centerY + delta));
+    } else if (type === 'rotate') {
+      newCal.rotationAngle = Math.max(-15, Math.min(15, Number(((newCal.rotationAngle ?? 0) + delta).toFixed(1))));
     } else if (type === 'stats-move-x') {
       newCal.statsPanelX = Math.max(-500, Math.min(1500, (newCal.statsPanelX ?? 16) + delta));
     } else if (type === 'stats-move-y') {
@@ -186,7 +250,7 @@ export const RemoteView: React.FC = () => {
   };
 
   const resetRemoteTabParameters = (step: number) => {
-    const newCal = { ...remoteCalibration };
+    const newCal = { ...remoteCalibrationRef.current };
     if (step === 1) {
       newCal.centerX = DEFAULT_CALIBRATION_REMOTE.centerX;
       newCal.centerY = DEFAULT_CALIBRATION_REMOTE.centerY;
@@ -198,6 +262,9 @@ export const RemoteView: React.FC = () => {
       newCal.rBullOuter = DEFAULT_CALIBRATION_REMOTE.rBullOuter;
       newCal.rBullInner = DEFAULT_CALIBRATION_REMOTE.rBullInner;
       newCal.arShowExtraOverlays = DEFAULT_CALIBRATION_REMOTE.arShowExtraOverlays;
+      newCal.arNumbersPosition = DEFAULT_CALIBRATION_REMOTE.arNumbersPosition;
+    } else if (step === 3) {
+      newCal.rotationAngle = 0;
     } else if (step === 8) {
       newCal.haloWhiteRadius = DEFAULT_CALIBRATION_REMOTE.haloWhiteRadius;
       newCal.haloMaxRadius = DEFAULT_CALIBRATION_REMOTE.haloMaxRadius;
@@ -209,7 +276,7 @@ export const RemoteView: React.FC = () => {
       newCal.statsFontSize = DEFAULT_CALIBRATION_REMOTE.statsFontSize;
       newCal.commentsFontSize = DEFAULT_CALIBRATION_REMOTE.commentsFontSize;
     }
-    saveRemoteCalibration(newCal);
+    saveRemoteCalibration(newCal, true);
   };
 
   const getRemoteStepSliderValue = () => {
@@ -234,16 +301,16 @@ export const RemoteView: React.FC = () => {
 
   // Fonction utilitaire pour mettre à jour l'état de la salle en ligne ou localement
   const updateRoomState = async (data: Partial<RoomData>) => {
-    if (isLocalMode) {
-      setLocalRoom(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          ...data,
-          lastUpdate: new Date()
-        } as RoomData;
-      });
-    } else if (roomId) {
+    setLocalRoom(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        ...data,
+        lastUpdate: new Date()
+      } as RoomData;
+    });
+
+    if (!isLocalMode && roomId) {
       await roomService.updateRoom(roomId, data);
     }
   };
@@ -252,9 +319,13 @@ export const RemoteView: React.FC = () => {
     if (!currentRoom || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const { undoCricketThrow } = await import('../services/cricketEngine');
+      const wasFinishedWithStats = currentRoom.status === 'finished' && !!currentRoom.statsRecorded;
       const result = undoCricketThrow(currentRoom);
       if (result) {
+        if (wasFinishedWithStats) {
+          roomService.revertMatchStats(currentRoom);
+          result.statsRecorded = false;
+        }
         if (isLocalMode) {
           setLocalRoom(prev => {
             if (!prev) return null;
@@ -286,14 +357,19 @@ export const RemoteView: React.FC = () => {
       updateRoomState={updateRoomState}
       remoteProjectorMode={remoteProjectorMode}
       setRemoteProjectorModeAndSync={setRemoteProjectorModeAndSync}
+      remoteTargetPosition={remoteTargetPosition}
+      setRemoteTargetPositionAndSync={setRemoteTargetPositionAndSync}
       remoteCalibrationStep={remoteCalibrationStep}
-      setRemoteCalibrationStep={setRemoteCalibrationStep}
+      setRemoteCalibrationStep={changeRemoteCalibrationStep}
       remoteCalibration={remoteCalibration}
       getRemoteStepSliderValue={getRemoteStepSliderValue}
       handleRemoteSliderChange={handleRemoteSliderChange}
       adjustRemoteCalibration={adjustRemoteCalibration}
       saveRemoteCalibration={saveRemoteCalibration}
       resetRemoteTabParameters={resetRemoteTabParameters}
+      remoteCalibrationSubMode={remoteCalibrationSubMode}
+      toggleRemoteCalibrationSubMode={toggleRemoteCalibrationSubMode}
+      triggerRemoteTestHit={triggerRemoteTestHit}
     />
   );
 
@@ -344,17 +420,18 @@ export const RemoteView: React.FC = () => {
                   </p>
                 </div>
 
-                {/* ── QR CODE ── */}
+                {/* ── QR CODE LOCAL (Zéro dépendance externe) ── */}
                 <div className="flex items-center gap-4 p-4 bg-black/40 border border-zinc-800/80 rounded-2xl">
                   {(() => {
                     const projectorUrl = `${window.location.origin}${window.location.pathname}#/projector?room=${currentRoom.roomId}`;
-                    const qrCodeApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(projectorUrl)}&color=38bdf8&bgcolor=0a0a0a&margin=8`;
                     return (
-                      <div className="p-1.5 bg-black border border-zinc-800 rounded-xl flex-shrink-0">
-                        <img
-                          src={qrCodeApiUrl}
-                          alt="QR Code Projecteur"
-                          className="w-[90px] h-[90px] rounded-lg"
+                      <div className="p-2 bg-[#0a0a0a] border border-zinc-800 rounded-xl flex-shrink-0">
+                        <QRCodeSVG
+                          value={projectorUrl}
+                          size={90}
+                          fgColor="#38bdf8"
+                          bgColor="#0a0a0a"
+                          level="M"
                         />
                       </div>
                     );
@@ -503,24 +580,40 @@ export const RemoteView: React.FC = () => {
     );
   };
 
-  // Lire le roomId depuis l'URL au chargement s'il y est (ex: suite à un scan de QR Code ou partage de lien)
+  // Lire le roomId et le mode depuis l'URL au chargement et lors des changements d'URL
   useEffect(() => {
-    const getRoomIdFromUrl = () => {
+    const handleUrlParams = () => {
       const hash = window.location.hash;
       const params = hash.split('?')[1];
       if (params) {
-        const roomParam = params.split('&').find(p => p.startsWith('room='));
+        const queryParams = new URLSearchParams(params);
+        const modeParam = queryParams.get('mode');
+        const roomParam = queryParams.get('room');
+
+        if (modeParam === 'local') {
+          initLocalRoom();
+          return;
+        }
+
         if (roomParam) {
-          return roomParam.split('=')[1].toUpperCase();
+          const cleanRoomId = roomParam.toUpperCase();
+          setIsLocalMode(false);
+          setRoomId(cleanRoomId);
+          // Si on bascule sur un vrai salon en ligne depuis un salon local, réinitialiser
+          setLocalRoom((prev) => {
+            if (prev?.roomId === 'LOCAL') return null;
+            return prev;
+          });
+          return;
         }
       }
-      return null;
     };
 
-    const id = getRoomIdFromUrl();
-    if (id) {
-      setRoomId(id);
-    }
+    handleUrlParams();
+    window.addEventListener('hashchange', handleUrlParams);
+    return () => {
+      window.removeEventListener('hashchange', handleUrlParams);
+    };
   }, []);
 
   // 1. Enregistrer la partie
@@ -533,6 +626,8 @@ export const RemoteView: React.FC = () => {
         status: 'playing' as const
       };
       localStorage.setItem('minou-darts-saved-active-game', JSON.stringify(gameToSave));
+
+      setInitialSetupStep('game');
 
       // Mettre à jour la partie en cours pour la remettre en setup
       const resetData = { status: 'setup' } as const;
@@ -554,8 +649,8 @@ export const RemoteView: React.FC = () => {
     if (currentRoom?.players && currentRoom.players.length > 0) {
       const names = currentRoom.players.map((p: { name: string }) => p.name);
       localStorage.setItem('minou-dart-last-selected-players', JSON.stringify(names));
-      
     }
+    setInitialSetupStep('game');
     const resetData = { status: 'setup' } as const;
     if (isLocalMode) {
       setLocalRoom(prev => ({ ...prev!, ...resetData } as RoomData));
@@ -572,8 +667,8 @@ export const RemoteView: React.FC = () => {
     if (currentRoom?.players && currentRoom.players.length > 0) {
       const names = currentRoom.players.map((p: { name: string }) => p.name);
       localStorage.setItem('minou-dart-last-selected-players', JSON.stringify(names));
-      
     }
+    setInitialSetupStep('players');
     const resetData = { status: 'setup' } as const;
     if (isLocalMode) {
       setLocalRoom(prev => ({ ...prev!, ...resetData } as RoomData));
@@ -622,12 +717,22 @@ export const RemoteView: React.FC = () => {
     }
   }, [currentRoom?.projectorMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Synchroniser remoteTargetPosition depuis Firestore quand le salon change
+  useEffect(() => {
+    const firestorePos = currentRoom?.targetPosition;
+    if (firestorePos && firestorePos !== remoteTargetPosition) {
+      setRemoteTargetPosition(firestorePos);
+      localStorage.setItem('minou_dart_target_position', firestorePos);
+    }
+  }, [currentRoom?.targetPosition]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Synchroniser la calibration depuis Firestore quand le salon change (si le panneau de calibration n'est pas actif)
   useEffect(() => {
     if (showCalibrationPanel) return;
     const firestoreCal = currentRoom?.calibration;
     if (firestoreCal) {
-      if (JSON.stringify(firestoreCal) !== JSON.stringify(remoteCalibration)) {
+      if (JSON.stringify(firestoreCal) !== JSON.stringify(remoteCalibrationRef.current)) {
+        remoteCalibrationRef.current = firestoreCal;
         setRemoteCalibration(firestoreCal);
         localStorage.setItem('minou_dart_calibration', JSON.stringify(firestoreCal));
       }
@@ -790,23 +895,7 @@ export const RemoteView: React.FC = () => {
             </div>
 
             <button
-              onClick={() => {
-                setIsLocalMode(true);
-                setRoomId('LOCAL');
-                setLocalRoom({
-                  roomId: 'LOCAL',
-                  theme: 'modern',
-                  gameType: 'x01',
-                  targetScore: 501,
-                  doubleOut: false,
-                  cricketScoringMode: 'standard',
-                  activePlayerIndex: 0,
-                  status: 'setup',
-                  players: [],
-                  createdAt: new Date(),
-                  creatorId: 'local-user'
-                });
-              }}
+              onClick={initLocalRoom}
               className="w-full py-4 bg-black/40 border border-theme-border/40 text-theme-text-primary hover:border-theme-accent hover:bg-theme-accent/10 font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-98"
             >
               JOUER EN LOCAL SUR LE TÉLÉPHONE
@@ -823,18 +912,37 @@ export const RemoteView: React.FC = () => {
 
 
 
+  // Garde défensive : s'assurer qu'aucun composant de jeu ne reçoive un salon nul (ex: sortie du Mode Local)
+  if (!currentRoom) {
+    return (
+      <div className="remote-view-container min-h-svh bg-theme-bg text-theme-text-primary flex flex-col justify-center items-center p-6 select-none">
+        <button
+          onClick={() => {
+            setIsLocalMode(false);
+            setRoomId(null);
+            setLocalRoom(null);
+            window.location.hash = '#/remote';
+          }}
+          className="px-6 py-3.5 bg-theme-accent text-black font-black text-xs rounded-xl shadow-lg cursor-pointer"
+        >
+          RETOUR À L'ACCUEIL TÉLÉCOMMANDE
+        </button>
+      </div>
+    );
+  }
+
   // --- RENDU 2 : FORMULAIRE DE CONFIGURATION DU SALON (SETUP) ---
-  if (currentRoom?.status === 'setup') {
+  if (currentRoom.status === 'setup') {
     return (
       <>
         <RemoteSetupPhase
           roomId={roomId}
           isLocalMode={isLocalMode}
           currentRoom={currentRoom}
+          initialSetupStep={initialSetupStep}
           onUpdateRoom={async (data) => {
-            if (isLocalMode) {
-              setLocalRoom(prev => prev ? { ...prev, ...data } as RoomData : null);
-            } else if (roomId) {
+            setLocalRoom(prev => prev ? { ...prev, ...data } as RoomData : null);
+            if (!isLocalMode && roomId) {
               await roomService.updateRoom(roomId, data);
             }
           }}
@@ -843,6 +951,7 @@ export const RemoteView: React.FC = () => {
             setRoom(null);
             setIsLocalMode(false);
             setLocalRoom(null);
+            setInitialSetupStep('players');
           }}
           setShowProjectorSettingsModal={setShowProjectorSettingsModal}
           setShowProjectionModal={setShowProjectionModal}
@@ -858,7 +967,7 @@ export const RemoteView: React.FC = () => {
     );
   }
   // --- RENDU 3 : PARTIE TERMINÉE (FIN) ---
-  if (currentRoom?.status === 'finished') {
+  if (currentRoom.status === 'finished') {
     return (
       <RemoteFinishedPhase
         currentRoom={currentRoom}
@@ -868,16 +977,24 @@ export const RemoteView: React.FC = () => {
         updateRoomState={updateRoomState}
         setRoomId={setRoomId}
         setRoom={setRoom}
+        onLeaveRoom={() => {
+          setIsLocalMode(false);
+          setRoomId(null);
+          setRoom(null);
+          setLocalRoom(null);
+          setInitialSetupStep('players');
+          window.location.hash = '#/remote';
+        }}
         handleCricketUndo={handleCricketUndo}
       />
     );
   }
 
   // --- RENDU 4 : EN COURS DE JEU ---
-  const isCricket = currentRoom?.gameType === 'cricket';
+  const isCricket = currentRoom.gameType === 'cricket';
 
   // Rendu spécifique au Bart
-  if (currentRoom?.gameType === 'bart') {
+  if (currentRoom.gameType === 'bart') {
     return (
       <>
         <BartRemoteGame
@@ -887,14 +1004,22 @@ export const RemoteView: React.FC = () => {
           roomId={roomId}
           setShowProjectionModal={setShowProjectionModal}
           onExitTrigger={() => setShowExitModal(true)}
+          onOpenProjectorSettings={() => {
+            setShowProjectorSettingsModal(true);
+            setShowCalibrationPanel(false);
+            updateRoomState({ isCalibrating: false });
+            localStorage.setItem('minou_dart_is_calibrating', 'false');
+          }}
         />
+        {renderProjectionModal()}
+        {renderProjectorSettingsModal()}
         {renderExitModal()}
       </>
     );
   }
 
   // Rendu spécifique au Tour de l'horloge
-  if (currentRoom?.gameType === 'clock') {
+  if (currentRoom.gameType === 'clock') {
     return (
       <>
         <ClockRemoteGame
@@ -911,6 +1036,8 @@ export const RemoteView: React.FC = () => {
             localStorage.setItem('minou_dart_is_calibrating', 'false');
           }}
         />
+        {renderProjectionModal()}
+        {renderProjectorSettingsModal()}
         {renderExitModal()}
       </>
     );
@@ -921,7 +1048,7 @@ export const RemoteView: React.FC = () => {
     return (
       <>
         <CricketRemoteGame
-          currentRoom={currentRoom as RoomData}
+          currentRoom={currentRoom}
           isLocalMode={isLocalMode}
           roomId={roomId}
           setLocalRoom={setLocalRoom}
@@ -935,6 +1062,8 @@ export const RemoteView: React.FC = () => {
           setMultiplier={setMultiplier}
           handleCricketUndo={handleCricketUndo}
         />
+        {renderProjectionModal()}
+        {renderProjectorSettingsModal()}
         {renderExitModal()}
       </>
     );
@@ -944,7 +1073,7 @@ export const RemoteView: React.FC = () => {
   return (
     <>
       <X01RemoteGame
-        currentRoom={currentRoom as RoomData}
+        currentRoom={currentRoom}
         isLocalMode={isLocalMode}
         setShowExitModal={setShowExitModal}
         setShowProjectionModal={setShowProjectionModal}
@@ -954,6 +1083,7 @@ export const RemoteView: React.FC = () => {
         error={error}
       />
       {renderProjectionModal()}
+      {renderProjectorSettingsModal()}
       {renderExitModal()}
     </>
   );

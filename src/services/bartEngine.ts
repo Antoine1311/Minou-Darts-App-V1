@@ -29,8 +29,8 @@ const pushHistory = (room: RoomData): string[] => {
       historyStates: []
     } : undefined
   };
-  // On garde les 15 dernières actions pour éviter de surcharger Firestore
-  const newHistory = [...history, JSON.stringify(cleanRoom)].slice(-15);
+  // On garde les 40 dernières actions (~20 échanges complets) sans surcharger Firestore
+  const newHistory = [...history, JSON.stringify(cleanRoom)].slice(-40);
   return newHistory;
 };
 
@@ -123,20 +123,22 @@ export const processBartResolution = (
 ): RoomData => {
   if (!room.bartConfig) return room;
 
-  const historyStates = pushHistory(room);
-
   if (resolution === 'cancel') {
-    // Si annulé, on réinitialise l'étape pour rejouer le point
+    // Si annulé, on revient à la sélection de cible sans polluer l'historique d'annulation
+    // (et on retire l'état intermédiaire empilé lors de processBartTargetSelection)
+    const prevHistory = room.bartConfig.historyStates || [];
     return {
       ...room,
       bartConfig: {
         ...room.bartConfig,
         currentTarget: null,
         resolutionStep: 'waiting_for_target',
-        historyStates
+        historyStates: prevHistory.length > 0 ? prevHistory.slice(0, -1) : []
       }
     };
   }
+
+  const historyStates = pushHistory(room);
 
   const updatedRoom = JSON.parse(JSON.stringify(room)) as RoomData;
   const bartConfig = { ...updatedRoom.bartConfig! };
@@ -254,6 +256,8 @@ export const processBartResolution = (
           setWon = true;
         } else if (winner.bartState!.gamesWon === 6 && loser.bartState!.gamesWon === 6) {
           bartConfig.isTieBreak = true;
+          // Mémoriser le joueur qui va commencer à servir le 1er point du tie-break
+          bartConfig.tieBreakStartServerIndex = bartConfig.serverIndex === 0 ? 1 : 0;
           winner.bartState!.tieBreakPoints = 0;
           loser.bartState!.tieBreakPoints = 0;
         }
@@ -267,6 +271,9 @@ export const processBartResolution = (
   }
 
   if (setWon) {
+    const wasTieBreak = bartConfig.isTieBreak;
+    const tbStarter = bartConfig.tieBreakStartServerIndex;
+
     winner.bartState!.setsWon++;
     winner.bartState!.gamesWon = 0;
     loser.bartState!.gamesWon = 0;
@@ -275,9 +282,14 @@ export const processBartResolution = (
     winner.bartState!.tieBreakPoints = 0;
     loser.bartState!.tieBreakPoints = 0;
     bartConfig.isTieBreak = false;
+    bartConfig.tieBreakStartServerIndex = undefined;
     
-    // Alternance de service globale pour commencer le nouveau set
-    bartConfig.serverIndex = bartConfig.serverIndex === 0 ? 1 : 0;
+    // Règle officielle ITF/ATP : après un tie-break, le joueur qui avait reçu au 1er point du tie-break sert le 1er jeu du nouveau set
+    if (wasTieBreak && tbStarter !== undefined) {
+      bartConfig.serverIndex = tbStarter === 0 ? 1 : 0;
+    } else {
+      bartConfig.serverIndex = bartConfig.serverIndex === 0 ? 1 : 0;
+    }
 
     if (winner.bartState!.setsWon >= bartConfig.setsToWin) {
       matchWon = true;

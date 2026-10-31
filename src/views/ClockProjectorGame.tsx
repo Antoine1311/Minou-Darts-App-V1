@@ -1,11 +1,13 @@
 import React from 'react';
-import { Zap, Tv, Maximize2, Eye } from 'lucide-react';
+import { Zap, Tv, Maximize2, Eye, ArrowLeftRight } from 'lucide-react';
 import type { RoomData, CalibrationSettings } from '../services/roomService';
 
 interface ClockProjectorGameProps {
   room: RoomData;
   projectorMode: 'classic' | 'fullscreen' | 'ar';
   setProjectorMode: (mode: 'classic' | 'fullscreen' | 'ar') => void;
+  targetPosition?: 'left' | 'right';
+  setTargetPosition?: (pos: 'left' | 'right') => void;
   showModeSelector: boolean;
   setShowModeSelector: (show: boolean) => void;
   renderCalibratedDartboard: (isCalibrationMode: boolean) => React.ReactNode;
@@ -22,20 +24,19 @@ export const ClockProjectorGame: React.FC<ClockProjectorGameProps> = ({
   room,
   projectorMode,
   setProjectorMode,
+  targetPosition = 'left',
+  setTargetPosition,
   showModeSelector,
   setShowModeSelector,
   renderCalibratedDartboard,
   isCalibrating,
-  setIsCalibrating,
-  calibrationStep,
   renderProjectorCalibrationInterface,
-  lastCalibrationHit,
   renderStatsCalibrationOverlay
 }) => {
   const players = room.players;
   const activePlayerIndex = room.activePlayerIndex;
   const includeBull = room.clockConfig?.includeBull ?? true;
-  const maxTarget = includeBull ? 25 : 20;
+  const totalSteps = includeBull ? 21 : 20;
 
   // Calcul du score de tri pour le classement :
   // On trie d'abord par cible actuelle descendante (plus on a avancé, mieux c'est).
@@ -53,12 +54,21 @@ export const ClockProjectorGame: React.FC<ClockProjectorGameProps> = ({
     });
 
   return (
-    <div className="w-full h-full bg-zinc-950 flex select-none overflow-hidden relative font-sans text-white">
+    <div className={`w-full h-full bg-zinc-950 flex ${targetPosition === 'right' ? 'flex-row-reverse' : 'flex-row'} select-none overflow-hidden relative font-sans text-white`}>
       
-      {/* 1. MOITIÉ GAUCHE : La cible de fléchettes (Projetée en classique ou AR) */}
+      {/* 1. Éclairage de la cible physique (mode Classique) ou projection AR */}
       {projectorMode !== 'fullscreen' && (
         <div 
-          className="w-1/2 h-full flex flex-col items-center justify-center relative transition-all duration-300"
+          className={`w-1/2 h-full transition-all duration-500 ${
+            targetPosition === 'right' ? 'shadow-[-20px_0_40px_rgba(255,255,255,0.15)]' : 'shadow-[20px_0_40px_rgba(255,255,255,0.15)]'
+          } z-10 flex flex-col relative overflow-hidden ${
+            projectorMode === 'ar'
+              ? isCalibrating && room.calibrationSubMode === 'white'
+                ? 'bg-white justify-center items-center p-0'
+                : 'bg-black justify-center items-center p-0'
+              : 'bg-white justify-end items-center pb-6'
+          }`}
+          id="projector-spotlight"
         >
           {projectorMode === 'ar' ? (
             <div className="w-full h-full relative flex flex-col justify-center items-center">
@@ -70,16 +80,21 @@ export const ClockProjectorGame: React.FC<ClockProjectorGameProps> = ({
               {renderStatsCalibrationOverlay && renderStatsCalibrationOverlay()}
             </div>
           ) : (
-            <div className="w-full h-full flex items-center justify-center p-4 md:p-6">
-              {renderCalibratedDartboard(false)}
-            </div>
+            <span
+              className="italic text-xl text-zinc-950 font-serif tracking-widest opacity-50 select-none"
+              style={{ fontFamily: "'Playfair Display', 'Didot', 'Georgia', serif" }}
+            >
+              Minou Dart Game
+            </span>
           )}
         </div>
       )}
 
-      {/* 2. MOITIÉ DROITE : Interface Sombre (Statistiques & Classement) */}
+      {/* 2. Interface Sombre (Statistiques & Classement) */}
       <div 
-        className={`${projectorMode === 'fullscreen' ? 'w-full' : 'w-1/2'} h-full bg-zinc-950 text-white transition-all duration-300 p-5 flex flex-col justify-between relative border-l border-zinc-900`}
+        className={`${projectorMode === 'fullscreen' ? 'w-full' : 'w-1/2'} h-full bg-zinc-950 text-white transition-all duration-300 p-5 flex flex-col justify-between relative ${
+          targetPosition === 'right' ? 'border-r' : 'border-l'
+        } border-zinc-900`}
       >
         {isCalibrating ? (
           renderProjectorCalibrationInterface()
@@ -122,6 +137,28 @@ export const ClockProjectorGame: React.FC<ClockProjectorGameProps> = ({
                       <span>{item.label}</span>
                     </button>
                   ))}
+
+                  {/* Option Inversion de côté Cible / Scores */}
+                  {projectorMode !== 'fullscreen' && setTargetPosition && (
+                    <>
+                      <div className="border-t border-zinc-800 my-1.5" />
+                      <button
+                        onClick={() => {
+                          setTargetPosition(targetPosition === 'left' ? 'right' : 'left');
+                          setShowModeSelector(false);
+                        }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-left text-zinc-300 hover:bg-zinc-800 transition-all cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <ArrowLeftRight className="w-4 h-4 text-theme-accent" />
+                          <span>{targetPosition === 'left' ? 'Cible à droite' : 'Cible à gauche'}</span>
+                        </div>
+                        <span className="text-[9px] uppercase tracking-wider text-zinc-400">
+                          {targetPosition === 'left' ? 'Gauche' : 'Droite'}
+                        </span>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -149,9 +186,11 @@ export const ClockProjectorGame: React.FC<ClockProjectorGameProps> = ({
                     throwHistory: []
                   };
 
-                  // Calculer le pourcentage de progression
-                  const progressValue = state.currentTarget === 25 ? 20 : (state.currentTarget - 1);
-                  const progressPercent = Math.min(100, Math.round((progressValue / maxTarget) * 100));
+                  // Calculer le pourcentage exact de progression (20 étapes ou 21 avec la Bulle)
+                  const completedSteps = (room.status === 'finished' && player.name === room.winnerName)
+                    ? totalSteps
+                    : (state.currentTarget === 25 ? 20 : Math.max(0, state.currentTarget - 1));
+                  const progressPercent = Math.min(100, Math.round((completedSteps / totalSteps) * 100));
                   
                   // Déterminer le libellé de la cible
                   const targetLabel = state.currentTarget === 25 ? 'BULL' : String(state.currentTarget);

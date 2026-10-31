@@ -3,6 +3,7 @@ import { ArrowLeft, Settings, Tv, Target, Smartphone } from 'lucide-react';
 import type { RoomData } from '../services/roomService';
 import { useGameStore } from '../store/gameStore';
 import { getCheckoutSuggestion } from '../services/checkoutSuggestions';
+import { haptics } from '../services/haptics';
 
 // --- Constantes et Utilitaires pour le tracé de la cible SVG ---
 const SECTORS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
@@ -112,7 +113,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
         block: 'nearest',
       });
     }
-  }, [activePlayerIndex, players]);
+  }, [activePlayerIndex, currentRoom.players]);
 
   const [x01InputMethod, setX01InputMethod] = useState<'keyboard' | 'target'>(() => {
     return (localStorage.getItem('minou_dart_x01_input_method') as 'keyboard' | 'target') || 'keyboard';
@@ -130,12 +131,13 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
   const handleThrowDirect = async (basePoints: number, customMultiplier?: 'S' | 'D' | 'T') => {
     if (!currentRoom || isSubmitting) return;
 
+    haptics.tap();
     setIsSubmitting(true);
     let points = basePoints;
     const targetMult = customMultiplier || multiplier;
     const isDouble = targetMult === 'D';
 
-    let label = '';
+    let label: string;
     if (basePoints === 0) {
       label = '0';
     } else if (basePoints === 25) {
@@ -169,6 +171,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
 
   const handleUndo = async () => {
     if (isSubmitting) return;
+    haptics.undo();
     setIsSubmitting(true);
     try {
       await undoX01();
@@ -178,6 +181,88 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  // Support des claviers physiques et pavés numériques USB (chiffres 0 à 9 et combinaisons 10-20 / 25)
+  const numBufferRef = useRef<string>('');
+  const numBufferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (numBufferTimerRef.current) clearTimeout(numBufferTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const flushNumBuffer = () => {
+      if (numBufferTimerRef.current) {
+        clearTimeout(numBufferTimerRef.current);
+        numBufferTimerRef.current = null;
+      }
+      const buffered = numBufferRef.current;
+      numBufferRef.current = '';
+      if (buffered) {
+        const val = parseInt(buffered, 10);
+        if (!Number.isNaN(val)) {
+          handleThrowDirect(val);
+        }
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === 'Backspace') {
+        e.preventDefault();
+        if (numBufferRef.current) {
+          if (numBufferTimerRef.current) clearTimeout(numBufferTimerRef.current);
+          numBufferRef.current = '';
+          return;
+        }
+        handleUndo();
+      } else if (e.key === 'Enter' && numBufferRef.current) {
+        e.preventDefault();
+        flushNumBuffer();
+      } else if (e.key >= '0' && e.key <= '9') {
+        e.preventDefault();
+        const digit = e.key;
+
+        // Si un '1' ou un '2' est en attente d'un second chiffre (10..20 ou 25)
+        if (numBufferRef.current) {
+          const combined = parseInt(numBufferRef.current + digit, 10);
+          if (numBufferTimerRef.current) {
+            clearTimeout(numBufferTimerRef.current);
+            numBufferTimerRef.current = null;
+          }
+          numBufferRef.current = '';
+          if ((combined >= 10 && combined <= 20) || combined === 25) {
+            handleThrowDirect(combined);
+          } else {
+            // Second chiffre non combinable : valider le 1er puis traiter le nouveau
+            handleThrowDirect(parseInt(digit, 10));
+          }
+          return;
+        }
+
+        // '1' et '2' peuvent précéder un second chiffre (10..20, 25) : court délai de 400 ms
+        if (digit === '1' || digit === '2') {
+          numBufferRef.current = digit;
+          numBufferTimerRef.current = setTimeout(flushNumBuffer, 400);
+        } else {
+          // '0' et '3'..'9' sont toujours à un seul chiffre : validation immédiate
+          handleThrowDirect(parseInt(digit, 10));
+        }
+      } else if (e.key === '+' || e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        setMultiplier(m => m === 'D' ? 'S' : 'D');
+      } else if (e.key === '*' || e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        setMultiplier(m => m === 'T' ? 'S' : 'T');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleThrowDirect, isSubmitting]);
 
 
 
@@ -244,14 +329,9 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
       >
         {players.map((player, idx) => {
           const isActive = activePlayerIndex === idx;
-          const numPlayers = players.length;
-          const isLastOddPlayer = (numPlayers % 2 !== 0) && (idx === numPlayers - 1);
           
-          // Extraire les lancers du joueur pour les 3 cases du tour
+          // Extraire les lancers du joueur pour le tour en cours
           const roundThrows = player.currentRoundThrows || [];
-          const dart1 = roundThrows[0] || '';
-          const dart2 = roundThrows[1] || '';
-          const dart3 = roundThrows[2] || '';
           
           // Calculer le score du tour
           const roundSum = isActive
@@ -315,45 +395,43 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                     )}
                   </div>
                   
-                  {/* Statut et Finition intégrée */}
+                  {/* Statut et Finition intégrée adaptée au nombre de fléchettes restantes */}
                   <div className="flex flex-wrap items-center gap-2 mt-0.5">
                     <span className="text-xs sm:text-sm text-zinc-500 font-bold truncate">
                       {isActive ? `En cours — ${player.dartsLeft} flèche(s)` : 'En attente'}
                     </span>
-                    {isActive && currentRoom?.gameType === 'x01' && player.score <= 180 && player.score > 1 && (
-                      <span className="text-[10px] sm:text-xs text-[#22c55e] font-black tracking-widest bg-[#22c55e]/10 border border-[#22c55e]/20 px-2 py-0.5 rounded shadow-sm">
-                        {getCheckoutSuggestion(player.score, !!currentRoom.doubleOut)?.join(' › ')}
-                      </span>
-                    )}
+                    {(() => {
+                      const minFinish = currentRoom?.doubleOut ? 2 : 1;
+                      const suggestion = (isActive && currentRoom?.gameType === 'x01' && player.score <= 180 && player.score >= minFinish)
+                        ? getCheckoutSuggestion(player.score, !!currentRoom.doubleOut, player.dartsLeft)
+                        : null;
+                      return suggestion && suggestion.length > 0 ? (
+                        <span className="text-[10px] sm:text-xs text-[#22c55e] font-black tracking-widest bg-[#22c55e]/10 border border-[#22c55e]/20 px-2 py-0.5 rounded shadow-sm">
+                          {suggestion.join(' › ')}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
 
-                  {/* Volée en cours (les 3 carrés) intégrée sous le nom au lieu d'être absolue */}
-                  {(isActive || roundSum > 0 || roundThrows.length > 0 || player.roundBust) && (
-                    <div className="flex items-center gap-1.5 mt-2">
+                  {/* Volée en cours : badges miniatures discrets pour les adversaires (le joueur actif bénéficie déjà de la rangée grand format au-dessus du pavé) */}
+                  {!isActive && (roundSum > 0 || roundThrows.length > 0 || player.roundBust) && (
+                    <div className="flex items-center gap-1.5 mt-1">
                       {player.roundBust ? (
-                        <span className="text-sm sm:text-base text-red-500 font-black tracking-widest animate-pulse h-10 flex items-center">
+                        <span className="text-xs text-red-400 font-extrabold uppercase tracking-wider">
                           BUST ❌
                         </span>
                       ) : (
-                        <>
-                          {[dart1, dart2, dart3].map((dart, dIdx) => {
-                            const isBustDart = player.roundBust && dart && dIdx === roundThrows.length - 1;
-                            return (
-                              <div 
-                                key={dIdx} 
-                                className={`w-12 h-10 sm:w-16 sm:h-12 rounded-lg border-2 flex items-center justify-center text-lg sm:text-xl font-black transition-all duration-300 shadow-md ${
-                                  isBustDart
-                                    ? 'border-red-500/60 bg-red-950/20 text-red-400'
-                                    : dart 
-                                      ? 'border-zinc-700 text-white bg-zinc-900' 
-                                      : 'border-zinc-900 text-transparent bg-black/40'
-                                }`}
-                              >
-                                {dart}
-                              </div>
-                            );
-                          })}
-                        </>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-[10px] text-zinc-500 font-bold uppercase mr-0.5">Dernière volée :</span>
+                          {roundThrows.map((dart, dIdx) => (
+                            <span 
+                              key={dIdx}
+                              className="px-1.5 py-0.5 text-[11px] font-black bg-zinc-900 border border-zinc-800 text-zinc-300 rounded"
+                            >
+                              {dart}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
                   )}
@@ -631,8 +709,8 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
               </button>
             </div>
 
-            {/* Ligne 1 : Multiplicateurs (DOUBLE, TRIPLE) */}
-            <div className="grid grid-cols-2 gap-2 w-full px-1">
+            {/* Ligne 1 : Multiplicateurs (DOUBLE, TRIPLE) + Accès direct D-BULL (50) */}
+            <div className="grid grid-cols-3 gap-2 w-full px-1">
               <button
                 onClick={() => setMultiplier(multiplier === 'D' ? 'S' : 'D')}
                 className={`text-black font-extrabold py-3 rounded-xl text-xs tracking-wider transition-all cursor-pointer select-none touch-manipulation ${
@@ -653,6 +731,16 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                 }`}
               >
                 TRIPLE
+              </button>
+
+              <button
+                onClick={() => handleThrowDirect(25, 'D')}
+                disabled={isSubmitting}
+                className="bg-red-700 hover:bg-red-600 active:scale-95 text-white font-extrabold py-3 rounded-xl text-xs tracking-wider transition-all cursor-pointer disabled:opacity-40 select-none touch-manipulation border border-red-500/50 shadow-md flex items-center justify-center gap-1"
+                title="Double Bull direct (50 points)"
+              >
+                <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
+                <span>D-BULL (50)</span>
               </button>
             </div>
 
@@ -702,7 +790,12 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                           : 'bg-[#2a2a2a] hover:bg-zinc-700 active:scale-95 text-white border-zinc-800/80'
                     }`}
                   >
-                    {isBull ? 'BULL' : num}
+                    {isBull ? (
+                      <span className="flex flex-col items-center justify-center leading-tight">
+                        <span className="text-[11px] font-black">BULL</span>
+                        <span className="text-[9px] font-bold opacity-80">25</span>
+                      </span>
+                    ) : num}
                   </button>
                 );
               })}

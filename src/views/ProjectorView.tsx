@@ -1,28 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useTheme } from '../context/ThemeContext';
-import { Award, Zap, ArrowLeft, Users, Smartphone, Eye, Tv, Maximize2, Sparkles, Settings, Check, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Crosshair } from 'lucide-react';
+import { Award, ArrowLeft, Users, Smartphone, Settings, Check, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Crosshair, ArrowLeftRight } from 'lucide-react';
 import { roomService, getGameHighlights } from '../services/roomService';
 import type { RoomData, CalibrationSettings } from '../services/roomService';
 import { BartProjectorGame } from './BartProjectorGame';
 import { ClockProjectorGame } from './ClockProjectorGame';
+import { X01ProjectorGame } from './X01ProjectorGame';
+import { CricketProjectorGame } from './CricketProjectorGame';
 import { getCheckoutSuggestion } from '../services/checkoutSuggestions';
 
 // --- Constantes & Utilitaires pour la géométrie de la cible ---
 const SECTORS = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
 
-const polarToCartesian = (centerX: number, centerY: number, radius: number, angleInDegrees: number) => {
-  const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
+const polarToCartesian = (centerX: number, centerY: number, radius: number, angleInDegrees: number, rotationAngle: number = 0) => {
+  const angleInRadians = (angleInDegrees - 90 + rotationAngle) * Math.PI / 180.0;
   return {
     x: centerX + (radius * Math.cos(angleInRadians)),
     y: centerY + (radius * Math.sin(angleInRadians)),
   };
 };
 
-const describeArc = (x: number, y: number, innerRadius: number, outerRadius: number, startAngle: number, endAngle: number) => {
-  const startOuter = polarToCartesian(x, y, outerRadius, endAngle);
-  const endOuter = polarToCartesian(x, y, outerRadius, startAngle);
-  const startInner = polarToCartesian(x, y, innerRadius, endAngle);
-  const endInner = polarToCartesian(x, y, innerRadius, startAngle);
+const describeArc = (x: number, y: number, innerRadius: number, outerRadius: number, startAngle: number, endAngle: number, rotationAngle: number = 0) => {
+  const startOuter = polarToCartesian(x, y, outerRadius, endAngle, rotationAngle);
+  const endOuter = polarToCartesian(x, y, outerRadius, startAngle, rotationAngle);
+  const startInner = polarToCartesian(x, y, innerRadius, endAngle, rotationAngle);
+  const endInner = polarToCartesian(x, y, innerRadius, startAngle, rotationAngle);
 
   const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
 
@@ -85,6 +88,24 @@ export const ProjectorView: React.FC = () => {
   });
   const [showModeSelector, setShowModeSelector] = useState<boolean>(false);
 
+  // Disposition de l'écran : 'left' (cible à gauche, scores à droite) ou 'right' (cible à droite, scores à gauche)
+  const [targetPosition, setTargetPosition] = useState<'left' | 'right'>(() => {
+    const saved = localStorage.getItem('minou_dart_target_position');
+    if (saved === 'left' || saved === 'right') return saved;
+    return 'left';
+  });
+
+  const handleToggleTargetPosition = (newPos?: 'left' | 'right') => {
+    const nextPos = newPos ?? (targetPosition === 'left' ? 'right' : 'left');
+    setTargetPosition(nextPos);
+    localStorage.setItem('minou_dart_target_position', nextPos);
+    if (roomId && roomId !== 'LOCAL') {
+      roomService.updateRoom(roomId, { targetPosition: nextPos }).catch(err =>
+        console.error('Erreur sync position cible Firestore:', err)
+      );
+    }
+  };
+
   // Synchronisation du mode de vue depuis la télécommande (via storage event)
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -94,6 +115,9 @@ export const ProjectorView: React.FC = () => {
           setProjectorMode(newMode);
         }
       }
+      if (e.key === 'minou_dart_target_position' && (e.newValue === 'left' || e.newValue === 'right')) {
+        setTargetPosition(e.newValue);
+      }
       if (e.key === 'minou_dart_calibration' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
@@ -101,6 +125,13 @@ export const ProjectorView: React.FC = () => {
         } catch (_) {
           // Ignorer les erreurs de parsing
         }
+      }
+      if (e.key === 'minou_dart_calibration_step' && e.newValue) {
+        const step = parseInt(e.newValue);
+        if (!isNaN(step)) setCalibrationStep(step);
+      }
+      if (e.key === 'minou_dart_calibration_submode' && (e.newValue === 'laser' || e.newValue === 'white')) {
+        setCalibrationSubMode(e.newValue);
       }
     };
     window.addEventListener('storage', handleStorageChange);
@@ -128,9 +159,11 @@ export const ProjectorView: React.FC = () => {
     rTripleOuter: DEFAULT_RADIUS * STANDARD_RATIOS.rTripleOuter,
     rDoubleInner: DEFAULT_RADIUS * STANDARD_RATIOS.rDoubleInner,
     rDoubleOuter: DEFAULT_RADIUS * STANDARD_RATIOS.rDoubleOuter,
+    rotationAngle: 0,
     haloWhiteRadius: DEFAULT_RADIUS * 1.1,
     haloMaxRadius: DEFAULT_RADIUS * 2.5,
     arShowExtraOverlays: true,
+    arNumbersPosition: 'inside',
     statsFontSize: 16,
     commentsFontSize: 18,
     statsFontScaleX: 1.0,
@@ -151,6 +184,10 @@ export const ProjectorView: React.FC = () => {
 
   const [isCalibrating, setIsCalibrating] = useState<boolean>(false);
   const [calibrationStep, setCalibrationStep] = useState<number>(1);
+  const [calibrationSubMode, setCalibrationSubMode] = useState<'laser' | 'white'>(() => {
+    const saved = localStorage.getItem('minou_dart_calibration_submode');
+    return (saved === 'white' || saved === 'laser') ? saved : 'laser';
+  });
   const [lastCalibrationHit, setLastCalibrationHit] = useState<{ region: string; score: number } | null>(null);
   const [highlightedSegment, setHighlightedSegment] = useState<string | null>(null);
   const [clickToCenterState, setClickToCenterState] = useState<'none' | 'center' | 'radius'>('none');
@@ -168,12 +205,37 @@ export const ProjectorView: React.FC = () => {
     if (room?.isCalibrating !== undefined) {
       setIsCalibrating(room.isCalibrating);
     }
-  }, [room?.isCalibrating]);
+    if (room?.calibrationStep !== undefined) {
+      setCalibrationStep(room.calibrationStep);
+    }
+    if (room?.calibrationSubMode !== undefined) {
+      setCalibrationSubMode(room.calibrationSubMode);
+    }
+    if (room?.calibrationTestHit) {
+      setHighlightedSegment(room.calibrationTestHit.segmentId);
+      setLastCalibrationHit({
+        region: room.calibrationTestHit.region,
+        score: room.calibrationTestHit.score,
+      });
+      if (hitTimeoutRef.current) clearTimeout(hitTimeoutRef.current);
+      hitTimeoutRef.current = setTimeout(() => {
+        setHighlightedSegment(null);
+        setLastCalibrationHit(null);
+      }, 2000);
+    }
+  }, [room?.isCalibrating, room?.calibrationStep, room?.calibrationSubMode, room?.calibrationTestHit]);
 
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'minou_dart_is_calibrating') {
         setIsCalibrating(e.newValue === 'true');
+      }
+      if (e.key === 'minou_dart_calibration_step' && e.newValue) {
+        const step = parseInt(e.newValue);
+        if (!isNaN(step)) setCalibrationStep(step);
+      }
+      if (e.key === 'minou_dart_calibration_submode' && (e.newValue === 'laser' || e.newValue === 'white')) {
+        setCalibrationSubMode(e.newValue);
       }
     };
     window.addEventListener('storage', handleStorageChange);
@@ -185,11 +247,14 @@ export const ProjectorView: React.FC = () => {
   }, []);
 
   // --- États et refs pour les animations interactives de tir (501) ---
-  const [animationActive, setAnimationActive] = useState<boolean>(false);
   const [animatingDarts, setAnimatingDarts] = useState<string[]>([]);
   const [activeAnimationIndex, setActiveAnimationIndex] = useState<number>(-1);
   const lastThrowsCountRef = useRef<number>(0);
   const activePlayerNameRef = useRef<string>('');
+  const lastAnimatedRoundIdRef = useRef<string | null | undefined>(undefined);
+  const totalMatchThrowsRef = useRef<number>(0);
+  const roundAnimIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const roundAnimTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // --- États pour le système d'animations de gamification AR ---
   interface ARParticle {
@@ -209,6 +274,30 @@ export const ProjectorView: React.FC = () => {
   }>({ type: null, active: false });
   const [particles, setParticles] = useState<ARParticle[]>([]);
   const [showRoundPath, setShowRoundPath] = useState<boolean>(false);
+
+  const stopRoundAnimations = () => {
+    if (roundAnimIntervalRef.current) {
+      clearInterval(roundAnimIntervalRef.current);
+      roundAnimIntervalRef.current = null;
+    }
+    roundAnimTimersRef.current.forEach(t => clearTimeout(t));
+    roundAnimTimersRef.current = [];
+    setActiveAnimationIndex(-1);
+    setAnimatingDarts([]);
+    setGlobalRoundAnimation({ type: null, active: false });
+    setParticles([]);
+    setShowRoundPath(false);
+  };
+
+  const handleSetIsCalibrating = (val: boolean) => {
+    setIsCalibrating(val);
+    localStorage.setItem('minou_dart_is_calibrating', String(val));
+    if (roomId && roomId !== 'LOCAL') {
+      roomService.updateRoom(roomId, { isCalibrating: val }).catch(err =>
+        console.error('Erreur sync isCalibrating Firestore:', err)
+      );
+    }
+  };
 
   const firestoreTimeoutRef = useRef<any>(null);
 
@@ -389,12 +478,14 @@ export const ProjectorView: React.FC = () => {
     }
   };
 
-  const adjustCalibration = (type: 'move-x' | 'move-y' | 'scale-step' | 'stats-move-x' | 'stats-move-y', delta: number) => {
+  const adjustCalibration = (type: 'move-x' | 'move-y' | 'scale-step' | 'stats-move-x' | 'stats-move-y' | 'rotate', delta: number) => {
     const newCal = { ...calibration };
     if (type === 'move-x') {
       newCal.centerX = Math.max(0, Math.min(1000, newCal.centerX + delta));
     } else if (type === 'move-y') {
       newCal.centerY = Math.max(0, Math.min(1000, newCal.centerY + delta));
+    } else if (type === 'rotate') {
+      newCal.rotationAngle = Math.max(-15, Math.min(15, Number(((newCal.rotationAngle ?? 0) + delta).toFixed(1))));
     } else if (type === 'stats-move-x') {
       newCal.statsPanelX = Math.max(-500, Math.min(1000, (newCal.statsPanelX ?? 16) + delta));
     } else if (type === 'stats-move-y') {
@@ -461,6 +552,9 @@ export const ProjectorView: React.FC = () => {
       newCal.rBullOuter = DEFAULT_CALIBRATION.rBullOuter;
       newCal.rBullInner = DEFAULT_CALIBRATION.rBullInner;
       newCal.arShowExtraOverlays = DEFAULT_CALIBRATION.arShowExtraOverlays;
+      newCal.arNumbersPosition = DEFAULT_CALIBRATION.arNumbersPosition;
+    } else if (step === 3) {
+      newCal.rotationAngle = 0;
     } else if (step === 8) {
       newCal.haloWhiteRadius = DEFAULT_CALIBRATION.haloWhiteRadius;
       newCal.haloMaxRadius = DEFAULT_CALIBRATION.haloMaxRadius;
@@ -561,8 +655,9 @@ export const ProjectorView: React.FC = () => {
   const renderProjectorCalibrationInterface = () => {
     const CALIBRATION_STEPS = [
       { step: 1, label: '🎯 CIBLE', desc: 'Centre & Rayon' },
-      { step: 8, label: '🔆 DÉGRADÉ', desc: 'Halos Blanc/Noir' },
-      { step: 9, label: '💬 ZONE COMMENTAIRES', desc: 'Position & Taille' },
+      { step: 3, label: '🔄 ROTATION', desc: 'Angle & Test' },
+      { step: 8, label: '🔆 DÉGRADÉ', desc: 'Halos' },
+      { step: 9, label: '💬 STATS', desc: 'Commentaires' },
     ];
 
     return (
@@ -573,9 +668,28 @@ export const ProjectorView: React.FC = () => {
             <Settings className="w-5 h-5 text-theme-accent animate-spin-slow" />
             <span className="text-sm font-black text-white uppercase tracking-wider">Interface de Calibrage</span>
           </div>
-          <span className="text-[10px] text-zinc-500 font-bold bg-zinc-900 border border-zinc-850 px-2 py-0.5 rounded-full uppercase">
-            Projecteur 720p
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const next = calibrationSubMode === 'laser' ? 'white' : 'laser';
+                setCalibrationSubMode(next);
+                localStorage.setItem('minou_dart_calibration_submode', next);
+                if (roomId && roomId !== 'LOCAL') {
+                  roomService.updateRoom(roomId, { calibrationSubMode: next }).catch(console.error);
+                }
+              }}
+              className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition-colors cursor-pointer active:scale-95 ${
+                calibrationSubMode === 'laser'
+                  ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40 hover:bg-cyan-500/30'
+                  : 'bg-white/20 text-white border-white/40 hover:bg-white/30'
+              }`}
+            >
+              {calibrationSubMode === 'laser' ? '⚡ Mire Laser' : '💡 Fond Blanc'}
+            </button>
+            <span className="text-[10px] text-zinc-500 font-bold bg-zinc-900 border border-zinc-850 px-2 py-0.5 rounded-full uppercase">
+              720p
+            </span>
+          </div>
         </div>
 
         {/* Sélecteur d'étapes (la "bulle de sélection" avec gros boutons faciles à lire) */}
@@ -583,15 +697,21 @@ export const ProjectorView: React.FC = () => {
           <p className="text-[10px] text-zinc-500 uppercase font-black tracking-widest">
             Étape de calibration
           </p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-1.5">
             {CALIBRATION_STEPS.map((item) => {
               const isDegrade = item.step === 8;
               const isSelected = calibrationStep === item.step;
               return (
                 <button
                   key={item.step}
-                  onClick={() => setCalibrationStep(item.step)}
-                  className={`py-3 px-2 rounded-2xl border text-center flex flex-col items-center justify-center gap-1 transition-all cursor-pointer select-none active:scale-95 ${
+                  onClick={() => {
+                    setCalibrationStep(item.step);
+                    localStorage.setItem('minou_dart_calibration_step', String(item.step));
+                    if (roomId && roomId !== 'LOCAL') {
+                      roomService.updateRoom(roomId, { calibrationStep: item.step }).catch(console.error);
+                    }
+                  }}
+                  className={`py-2.5 px-1.5 rounded-2xl border text-center flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer select-none active:scale-95 ${
                     isSelected
                       ? isDegrade
                         ? 'bg-orange-500 text-white border-orange-400 shadow-[0_0_15px_rgba(234,88,12,0.4)] scale-105 font-black'
@@ -601,16 +721,14 @@ export const ProjectorView: React.FC = () => {
                 >
                   <span className={`font-black ${
                     isDegrade 
-                      ? 'text-lg md:text-xl lg:text-2xl tracking-wide' 
-                      : 'text-base md:text-lg'
+                      ? 'text-base md:text-lg tracking-wide' 
+                      : 'text-sm md:text-base'
                   }`}>
                     {item.label}
                   </span>
-                  <span className={`font-bold leading-tight ${
-                    isDegrade 
-                      ? 'text-[10px] md:text-[11px]' 
-                      : 'text-[9px]'
-                  } ${isSelected ? (isDegrade ? 'text-white/90' : 'text-black/85') : 'text-zinc-500'}`}>
+                  <span className={`font-bold leading-tight text-[8px] md:text-[9px] ${
+                    isSelected ? (isDegrade ? 'text-white/90' : 'text-black/85') : 'text-zinc-500'
+                  }`}>
                     {item.desc}
                   </span>
                 </button>
@@ -686,6 +804,40 @@ export const ProjectorView: React.FC = () => {
                   />
                 </button>
               </div>
+              {/* Position des numéros 1 à 20 projetés en Réalité Augmentée */}
+              <div className="bg-zinc-900/80 border border-zinc-800/80 rounded-2xl p-2.5 space-y-1.5">
+                <span className="font-black uppercase tracking-wider text-zinc-500 text-[10px] block">
+                  Position des numéros 1 à 20 (AR)
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {([
+                    { value: 'inside', label: 'Intérieur', desc: 'Sur simples' },
+                    { value: 'outside', label: 'Extérieur', desc: 'Hors doubles' },
+                    { value: 'hidden', label: 'Masqués', desc: 'Cible nue' },
+                  ] as const).map((opt) => {
+                    const currentPos = calibration.arNumbersPosition ?? 'inside';
+                    const isSelected = currentPos === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        onClick={() => {
+                          saveCalibration({ ...calibration, arNumbersPosition: opt.value });
+                        }}
+                        className={`py-1.5 px-1.5 rounded-xl border text-center flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer select-none active:scale-95 ${
+                          isSelected
+                            ? 'bg-theme-accent text-black border-theme-accent font-black shadow-md'
+                            : 'bg-zinc-950 text-zinc-300 border-zinc-800 hover:bg-zinc-800 hover:text-white font-bold'
+                        }`}
+                      >
+                        <span className="text-xs leading-tight">{opt.label}</span>
+                        <span className={`text-[8px] leading-tight ${isSelected ? 'text-black/80 font-bold' : 'text-zinc-500'}`}>
+                          {opt.desc}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               {/* Slider Rayon Global */}
               {renderProjectorSliderWithButtons(
                 'Rayon de la cible', 
@@ -722,6 +874,83 @@ export const ProjectorView: React.FC = () => {
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Réinitialiser cet onglet
+              </button>
+            </div>
+          )}
+
+          {calibrationStep === 3 && (
+            <div className="space-y-2.5">
+              {/* Slider Rotation Angle */}
+              {renderProjectorSliderWithButtons(
+                'Rotation fine', 
+                calibration.rotationAngle ?? 0, 
+                -15, 
+                15, 
+                (val) => {
+                  const currentVal = calibration.rotationAngle ?? 0;
+                  adjustCalibration('rotate', val - currentVal);
+                },
+                0.5,
+                '°',
+                true,
+                1
+              )}
+
+              {/* Boutons de test d'alignement */}
+              <div className="bg-zinc-900/80 border border-zinc-800/80 rounded-2xl p-2.5 space-y-2">
+                <span className="font-black uppercase tracking-wider text-zinc-500 text-[10px] block">
+                  Test d'alignement rapide
+                </span>
+                <div className="grid grid-cols-4 gap-1.5">
+                  <button
+                    onClick={() => {
+                      setHighlightedSegment('triple-20');
+                      setLastCalibrationHit({ region: 'Triple 20', score: 60 });
+                      setTimeout(() => { setHighlightedSegment(null); setLastCalibrationHit(null); }, 2000);
+                    }}
+                    className="py-2 bg-yellow-500/20 hover:bg-yellow-500 text-yellow-300 hover:text-black font-black text-xs rounded-xl border border-yellow-500/40 transition-all cursor-pointer active:scale-95"
+                  >
+                    T20
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHighlightedSegment('bull-inner');
+                      setLastCalibrationHit({ region: 'Double Bull', score: 50 });
+                      setTimeout(() => { setHighlightedSegment(null); setLastCalibrationHit(null); }, 2000);
+                    }}
+                    className="py-2 bg-red-500/20 hover:bg-red-500 text-red-300 hover:text-white font-black text-xs rounded-xl border border-red-500/40 transition-all cursor-pointer active:scale-95"
+                  >
+                    BULL
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHighlightedSegment('double-16');
+                      setLastCalibrationHit({ region: 'Double 16', score: 32 });
+                      setTimeout(() => { setHighlightedSegment(null); setLastCalibrationHit(null); }, 2000);
+                    }}
+                    className="py-2 bg-cyan-500/20 hover:bg-cyan-500 text-cyan-300 hover:text-black font-black text-xs rounded-xl border border-cyan-500/40 transition-all cursor-pointer active:scale-95"
+                  >
+                    D16
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHighlightedSegment('single-outer-19');
+                      setLastCalibrationHit({ region: 'Simple 19', score: 19 });
+                      setTimeout(() => { setHighlightedSegment(null); setLastCalibrationHit(null); }, 2000);
+                    }}
+                    className="py-2 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-black font-black text-xs rounded-xl border border-emerald-500/40 transition-all cursor-pointer active:scale-95"
+                  >
+                    S19
+                  </button>
+                </div>
+              </div>
+
+              <button
+                onClick={() => resetTabParameters(3)}
+                className="w-full mt-2 py-2 border border-red-900/50 bg-red-950/20 text-red-500 hover:bg-red-950/50 hover:text-red-400 rounded-xl flex items-center justify-center gap-2 font-bold transition-all cursor-pointer active:scale-95 text-[10px] uppercase tracking-wider"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Réinitialiser la rotation (0°)
               </button>
             </div>
           )}
@@ -998,12 +1227,13 @@ export const ProjectorView: React.FC = () => {
             <button
               onClick={() => {
                 setIsCalibrating(false);
+                localStorage.setItem('minou_dart_is_calibrating', 'false');
                 setLastCalibrationHit(null);
                 if (firestoreTimeoutRef.current) {
                   clearTimeout(firestoreTimeoutRef.current);
                 }
                 if (roomId && roomId !== 'LOCAL') {
-                  roomService.updateRoom(roomId, { calibration }).catch(err =>
+                  roomService.updateRoom(roomId, { calibration, isCalibrating: false }).catch(err =>
                     console.error('Erreur sync calibration Firestore finale:', err)
                   );
                 }
@@ -1031,14 +1261,37 @@ export const ProjectorView: React.FC = () => {
     const isCricket = room?.gameType === 'cricket';
     const isX01 = room?.gameType === 'x01';
     const isBart = room?.gameType === 'bart';
+    const isClock = room?.gameType === 'clock';
     
     let x01CheckoutDarts: string[] = [];
     if (isX01 && room) {
       const activePlayer = room.players[room.activePlayerIndex];
-      if (activePlayer && activePlayer.score <= 180 && activePlayer.score > 1) {
-        x01CheckoutDarts = getCheckoutSuggestion(activePlayer.score, !!room.doubleOut) || [];
+      const minFinish = room.doubleOut ? 2 : 1;
+      if (activePlayer && activePlayer.score <= 180 && activePlayer.score >= minFinish) {
+        x01CheckoutDarts = getCheckoutSuggestion(activePlayer.score, !!room.doubleOut, activePlayer.dartsLeft) || [];
       }
     }
+
+    // Détection précise du segment visé au Tour de l'Horloge selon le mode (standard / double / triple)
+    const isClockSegmentTargeted = (
+      type: 'single-inner' | 'single-outer' | 'triple' | 'double' | 'bull-inner' | 'bull-outer',
+      score: number
+    ): boolean => {
+      if (!isClock || !room) return false;
+      const activePlayer = room.players[room.activePlayerIndex];
+      const currentTarget = activePlayer?.clockState?.currentTarget ?? 1;
+      const clockMode = room.clockConfig?.mode || 'standard';
+      const effectiveScore = score === 50 ? 25 : score;
+
+      if (currentTarget === 25) {
+        if (clockMode === 'double') return type === 'bull-inner';
+        return type === 'bull-inner' || type === 'bull-outer';
+      }
+      if (effectiveScore !== currentTarget) return false;
+      if (clockMode === 'double') return type === 'double';
+      if (clockMode === 'triple') return type === 'triple';
+      return true;
+    };
 
     const getSegmentFill = (type: 'single-inner' | 'single-outer' | 'triple' | 'double' | 'bull-inner' | 'bull-outer', score: number, segmentId: string) => {
       if (isCalibrationMode) {
@@ -1062,16 +1315,8 @@ export const ProjectorView: React.FC = () => {
         return '#ffffff';
       }
 
-      const isClock = room?.gameType === 'clock';
       if (isClock && room) {
-        const activePlayer = room.players[room.activePlayerIndex];
-        const currentTarget = activePlayer?.clockState?.currentTarget ?? 1;
-        const effectiveScore = score === 50 ? 25 : score;
-        const isTarget = currentTarget === 25 ? (effectiveScore === 25) : (effectiveScore === currentTarget);
-        if (isTarget) {
-          return '#ffff00'; // Jaune fluo pour le segment visé
-        }
-        return '#ffffff'; // Blanc pour le reste
+        return isClockSegmentTargeted(type, score) ? '#ffff00' : '#ffffff';
       }
 
 
@@ -1103,51 +1348,72 @@ export const ProjectorView: React.FC = () => {
       const fill = getSegmentFill(type, score, segmentId);
       
       if (isCalibrationMode) {
-        return {
-          fill,
-          stroke: '#000000',
-          strokeWidth: calibrationStep === 1 
+        const isLaser = calibrationSubMode === 'laser';
+        let strokeColor = isLaser ? 'rgba(255, 255, 255, 0.45)' : '#000000';
+        let strokeW = 1.5;
+        let segFill = fill;
+
+        if (isLaser) {
+          if (type === 'double') {
+            strokeColor = calibrationStep === 2 ? '#00f0ff' : 'rgba(0, 240, 255, 0.85)';
+            strokeW = calibrationStep === 2 ? 4.5 : 2;
+            if (calibrationStep === 2) segFill = 'rgba(0, 240, 255, 0.2)';
+          } else if (type === 'triple') {
+            strokeColor = 'rgba(234, 179, 8, 0.85)';
+            strokeW = 2;
+          } else if (type === 'bull-outer') {
+            strokeColor = '#22c55e';
+            strokeW = 2.5;
+            segFill = 'rgba(34, 197, 94, 0.2)';
+          } else if (type === 'bull-inner') {
+            strokeColor = '#ff0055';
+            strokeW = 3;
+            segFill = 'rgba(255, 0, 85, 0.5)';
+          }
+        } else {
+          strokeW = calibrationStep === 1 
             ? 1.5 
             : (type === 'double' && (calibrationStep === 2 || calibrationStep === 3)) ||
               (type === 'triple' && (calibrationStep === 4 || calibrationStep === 5)) ||
               (type === 'bull-outer' && calibrationStep === 6) ||
               (type === 'bull-inner' && calibrationStep === 7)
               ? 4 
-              : 1.5,
+              : 1.5;
+        }
+
+        if (highlightedSegment === segmentId) {
+          segFill = '#00ffff';
+          strokeColor = '#ffffff';
+          strokeW = 4.5;
+        }
+
+        return {
+          fill: segFill,
+          stroke: strokeColor,
+          strokeWidth: strokeW,
           className: 'cursor-pointer',
         };
       }
 
-      // Mode Réalité Augmentée
-      let isSuggested = false;
+      // Mode Réalité Augmentée — Guidage bicolore des suggestions de Checkout X01
+      let isPrimarySuggested = false;
+      let isSecondarySuggested = false;
       if (isX01 && x01CheckoutDarts.length > 0) {
         const checkMatch = (dart: string) => {
-          if (dart === 'BULL' && (type === 'bull-inner' || type === 'bull-outer')) return true;
-          if (dart === 'D25' && type === 'bull-inner') return true;
+          if ((dart === 'BULL' || dart === 'D25' || dart === '50') && type === 'bull-inner') return true;
+          if ((dart === '25' || dart === 'S25') && type === 'bull-outer') return true;
           if (dart === `T${score}` && type === 'triple') return true;
           if (dart === `D${score}` && type === 'double') return true;
           if (dart === `S${score}` && (type === 'single-inner' || type === 'single-outer')) return true;
           return false;
         };
-        isSuggested = x01CheckoutDarts.some(checkMatch);
-      }
-
-      const isClock = room?.gameType === 'clock';
-      let isClockTargetToHit = false;
-      if (isClock && room && !isCalibrationMode) {
-        const activePlayer = room.players[room.activePlayerIndex];
-        const currentTarget = activePlayer?.clockState?.currentTarget ?? 1;
-        const effectiveScore = score === 50 ? 25 : score;
-        if (currentTarget === 25) {
-          if (type === 'bull-inner' || type === 'bull-outer') {
-            isClockTargetToHit = true;
-          }
-        } else {
-          if (effectiveScore === currentTarget) {
-            isClockTargetToHit = true;
-          }
+        isPrimarySuggested = checkMatch(x01CheckoutDarts[0]);
+        if (!isPrimarySuggested && x01CheckoutDarts.length > 1) {
+          isSecondarySuggested = x01CheckoutDarts.slice(1).some(checkMatch);
         }
       }
+
+      const isClockTargetToHit = !isCalibrationMode && isClockSegmentTargeted(type, score);
 
       const isBart = room?.gameType === 'bart';
       let isBartTarget = false;
@@ -1195,12 +1461,21 @@ export const ProjectorView: React.FC = () => {
         };
       }
 
-      if (isSuggested) {
+      if (isPrimarySuggested) {
         return {
-          fill: '#ffffff',
-          stroke: '#ffff00',
+          fill: '#fef08a',
+          stroke: '#ffea00',
           strokeWidth: 7,
           className: 'cursor-pointer suggested-finish-segment',
+        };
+      }
+
+      if (isSecondarySuggested) {
+        return {
+          fill: '#cffafe',
+          stroke: '#06b6d4',
+          strokeWidth: 4.5,
+          className: 'cursor-pointer suggested-secondary-segment',
         };
       }
 
@@ -1254,6 +1529,8 @@ export const ProjectorView: React.FC = () => {
       }, 1500);
     };
 
+    const rot = calibration.rotationAngle ?? 0;
+
     if (clickToCenterState === 'none') {
       // 1. Dessiner les tranches
       SECTORS.forEach((score, index) => {
@@ -1264,7 +1541,7 @@ export const ProjectorView: React.FC = () => {
         segments.push(
           <path
             key={idInnerSingle}
-            d={describeArc(centerX, centerY, rBullOuter, rTripleInner, startAngle, endAngle)}
+            d={describeArc(centerX, centerY, rBullOuter, rTripleInner, startAngle, endAngle, rot)}
             {...getSegmentProps('single-inner', score, idInnerSingle)}
             onClick={() => handleSegmentClick(`Simple ${score} (Int)`, score, idInnerSingle)}
           />
@@ -1274,7 +1551,7 @@ export const ProjectorView: React.FC = () => {
         segments.push(
           <path
             key={idTriple}
-            d={describeArc(centerX, centerY, rTripleInner, rTripleOuter, startAngle, endAngle)}
+            d={describeArc(centerX, centerY, rTripleInner, rTripleOuter, startAngle, endAngle, rot)}
             {...getSegmentProps('triple', score, idTriple)}
             onClick={() => handleSegmentClick(`Triple ${score}`, score * 3, idTriple)}
           />
@@ -1284,7 +1561,7 @@ export const ProjectorView: React.FC = () => {
         segments.push(
           <path
             key={idOuterSingle}
-            d={describeArc(centerX, centerY, rTripleOuter, rDoubleInner, startAngle, endAngle)}
+            d={describeArc(centerX, centerY, rTripleOuter, rDoubleInner, startAngle, endAngle, rot)}
             {...getSegmentProps('single-outer', score, idOuterSingle)}
             onClick={() => handleSegmentClick(`Simple ${score} (Ext)`, score, idOuterSingle)}
           />
@@ -1294,7 +1571,7 @@ export const ProjectorView: React.FC = () => {
         segments.push(
           <path
             key={idDouble}
-            d={describeArc(centerX, centerY, rDoubleInner, rDoubleOuter, startAngle, endAngle)}
+            d={describeArc(centerX, centerY, rDoubleInner, rDoubleOuter, startAngle, endAngle, rot)}
             {...getSegmentProps('double', score, idDouble)}
             onClick={() => handleSegmentClick(`Double ${score}`, score * 2, idDouble)}
           />
@@ -1325,38 +1602,51 @@ export const ProjectorView: React.FC = () => {
       );
     }
 
-    const showCross = isCalibrationMode && calibrationStep === 1 && clickToCenterState === 'none';
-
-    // 3. Dessiner les numéros extérieurs projetés (blanc sur la partie sombre extérieure de la cible réelle)
+    // 3. Dessiner les numéros 1 à 20 projetés selon le réglage (intérieur / extérieur / masqués)
     const boardNumbers: React.ReactNode[] = [];
     const cricketCoches: React.ReactNode[] = [];
-    if (!isCalibrationMode) {
+    const numbersPosition = calibration.arNumbersPosition ?? 'inside';
+    const isLaserCal = isCalibrationMode && calibrationSubMode === 'laser';
+    if (!isCalibrationMode || calibrationStep === 3 || isLaserCal) {
       SECTORS.forEach((score, index) => {
         const angleInDegrees = index * segmentAngle;
-        const meanRadius = (rTripleOuter + rDoubleInner) / 2;
-        const textPos = polarToCartesian(centerX, centerY, meanRadius, angleInDegrees);
-        
-        let textRotation = angleInDegrees;
-        if (angleInDegrees > 90 && angleInDegrees < 270) {
+        let textRotation = angleInDegrees + rot;
+        if (textRotation > 90 && textRotation < 270) {
           textRotation += 180;
         }
 
-        boardNumbers.push(
-          <text
-            key={`num-${score}`}
-            x={textPos.x}
-            y={textPos.y + 6}
-            textAnchor="middle"
-            fill="#000000"
-            fontSize="24"
-            fontWeight="900"
-            fontFamily="sans-serif"
-            transform={`rotate(${textRotation}, ${textPos.x}, ${textPos.y})`}
-            className="select-none pointer-events-none"
-          >
-            {score}
-          </text>
-        );
+        if (numbersPosition !== 'hidden') {
+          const isOutside = numbersPosition === 'outside';
+          const meanRadius = isOutside ? rDoubleOuter * 1.11 : (rTripleOuter + rDoubleInner) / 2;
+          const textPos = polarToCartesian(centerX, centerY, meanRadius, angleInDegrees, rot);
+
+          boardNumbers.push(
+            <text
+              key={`num-${score}`}
+              x={textPos.x}
+              y={textPos.y + 6}
+              textAnchor="middle"
+              fill={isLaserCal ? '#00f0ff' : '#000000'}
+              stroke={!isLaserCal && isOutside ? '#ffffff' : undefined}
+              strokeWidth={!isLaserCal && isOutside ? 6 : undefined}
+              strokeLinejoin={!isLaserCal && isOutside ? 'round' : undefined}
+              fontSize="24"
+              fontWeight="900"
+              fontFamily="sans-serif"
+              transform={`rotate(${textRotation}, ${textPos.x}, ${textPos.y})`}
+              className="select-none pointer-events-none"
+              style={
+                isLaserCal
+                  ? { filter: 'drop-shadow(0 0 3px rgba(0,240,255,0.7))' }
+                  : isOutside
+                    ? { paintOrder: 'stroke' }
+                    : undefined
+              }
+            >
+              {score}
+            </text>
+          );
+        }
 
         // Dessiner les coches de Cricket dans le Single Inner
         if (isCricket && room) {
@@ -1366,7 +1656,7 @@ export const ProjectorView: React.FC = () => {
             const activeMarks = activePlayer?.cricketMarks?.[String(score)] || 0;
             if (activeMarks > 0) {
               const meanRadiusInner = (rBullOuter + rTripleInner) / 2;
-              const symbolPos = polarToCartesian(centerX, centerY, meanRadiusInner, angleInDegrees);
+              const symbolPos = polarToCartesian(centerX, centerY, meanRadiusInner, angleInDegrees, rot);
               
               cricketCoches.push(
                 <g
@@ -1537,6 +1827,16 @@ export const ProjectorView: React.FC = () => {
             stroke-linecap: round;
             stroke-linejoin: round;
           }
+          @keyframes pulse-secondary-cyan {
+            0% { stroke-width: 3.5px; stroke: #06b6d4; filter: drop-shadow(0 0 2px rgba(6,182,212,0.45)); }
+            50% { stroke-width: 6.5px; stroke: #22d3ee; filter: drop-shadow(0 0 8px rgba(34,211,238,0.85)); }
+            100% { stroke-width: 3.5px; stroke: #06b6d4; filter: drop-shadow(0 0 2px rgba(6,182,212,0.45)); }
+          }
+          .suggested-secondary-segment {
+            animation: pulse-secondary-cyan 1.6s infinite ease-in-out;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+          }
           @keyframes blink-hit {
             0% { fill: #00ffff; filter: brightness(1.2); }
             50% { fill: #ffffff; filter: brightness(1); }
@@ -1652,7 +1952,7 @@ export const ProjectorView: React.FC = () => {
         className="w-full h-full max-h-full select-none"
         viewBox="0 0 1000 1000"
         style={{ 
-          backgroundColor: (isCalibrationMode && calibrationStep !== 8) ? '#ffffff' : 'transparent', 
+          backgroundColor: (isCalibrationMode && calibrationSubMode === 'white' && calibrationStep !== 8) ? '#ffffff' : 'transparent', 
           overflow: 'visible',
           cursor: clickToCenterState !== 'none' ? 'none' : 'default'
         }}
@@ -1697,13 +1997,24 @@ export const ProjectorView: React.FC = () => {
 
         {calibration.arShowExtraOverlays !== false && segments}
 
+        {/* Cercles de référence lumineux en mode calibration Laser */}
+        {isCalibrationMode && calibrationSubMode === 'laser' && (
+          <>
+            <circle cx={centerX} cy={centerY} r={rDoubleInner} fill="none" stroke="rgba(0, 240, 255, 0.6)" strokeWidth="2" />
+            <circle cx={centerX} cy={centerY} r={rTripleOuter} fill="none" stroke="rgba(234, 179, 8, 0.75)" strokeWidth="2.5" />
+            <circle cx={centerX} cy={centerY} r={rTripleInner} fill="none" stroke="rgba(234, 179, 8, 0.5)" strokeWidth="1.5" />
+            <circle cx={centerX} cy={centerY} r={rBullOuter} fill="none" stroke="#22c55e" strokeWidth="2.5" />
+            <circle cx={centerX} cy={centerY} r={rBullInner} fill="none" stroke="#ff0055" strokeWidth="3" />
+          </>
+        )}
+
         <circle
           cx={centerX}
           cy={centerY}
           r={rDoubleOuter}
           fill="none"
-          stroke={isCalibrationMode ? '#000000' : '#ffffff'}
-          strokeWidth={isCalibrationMode ? (calibrationStep === 2 ? 5 : 2) : 2}
+          stroke={isCalibrationMode ? (calibrationSubMode === 'laser' ? (calibrationStep === 2 ? '#00f0ff' : 'rgba(0, 240, 255, 0.85)') : '#000000') : '#ffffff'}
+          strokeWidth={isCalibrationMode ? (calibrationStep === 2 ? 6 : 2.5) : 2}
         />
 
         {calibration.arShowExtraOverlays !== false && boardNumbers}
@@ -1990,34 +2301,58 @@ export const ProjectorView: React.FC = () => {
           })()
         )}
 
-        {showCross && calibration.arShowExtraOverlays !== false && (
+        {/* Repères spécifiques selon l'étape de calibration */}
+        {isCalibrationMode && clickToCenterState === 'none' && (
           <>
-            <line
-              x1="0"
-              y1={centerY}
-              x2="1000"
-              y2={centerY}
-              stroke="#000000"
-              strokeWidth="4"
-              strokeDasharray="10, 10"
-            />
-            <line
-              x1={centerX}
-              y1="0"
-              x2={centerX}
-              y2="1000"
-              stroke="#000000"
-              strokeWidth="4"
-              strokeDasharray="10, 10"
-            />
-            <circle
-              cx={centerX}
-              cy={centerY}
-              r="20"
-              fill="none"
-              stroke="#000000"
-              strokeWidth="3"
-            />
+            {/* Étape 1 : Réticule Laser de centrage du Bullseye */}
+            {calibrationStep === 1 && (
+              <g className="pointer-events-none animate-pulse">
+                <line x1="0" y1={centerY} x2="1000" y2={centerY} stroke="#ff0055" strokeWidth="2.5" strokeDasharray="12, 6" opacity="0.85" />
+                <line x1={centerX} y1="0" x2={centerX} y2="1000" stroke="#ff0055" strokeWidth="2.5" strokeDasharray="12, 6" opacity="0.85" />
+                <line x1={centerX - 50} y1={centerY} x2={centerX + 50} y2={centerY} stroke="#00ffff" strokeWidth="4" />
+                <line x1={centerX} y1={centerY - 50} x2={centerX} y2={centerY + 50} stroke="#00ffff" strokeWidth="4" />
+                <circle cx={centerX} cy={centerY} r={rBullInner * 2.5} fill="none" stroke="#00ffff" strokeWidth="2.5" strokeDasharray="6, 4" />
+                <circle cx={centerX} cy={centerY} r={rBullInner} fill="#ff0055" stroke="#ffffff" strokeWidth="2.5" />
+                <circle cx={centerX} cy={centerY} r="3" fill="#ffffff" />
+                <text x={centerX} y={centerY - rBullOuter * 2.2} textAnchor="middle" fill="#00ffff" fontSize="18" fontWeight="900" style={{ filter: 'drop-shadow(0 0 4px #00ffff)' }}>
+                  ALIGNER SUR LA BULLE ROUGE
+                </text>
+              </g>
+            )}
+
+            {/* Étape 2 : Anneau renforcé des Doubles */}
+            {calibrationStep === 2 && (
+              <g className="pointer-events-none">
+                <circle cx={centerX} cy={centerY} r={rDoubleOuter} fill="none" stroke="#00f0ff" strokeWidth="6" strokeDasharray="12, 6" />
+                <circle cx={centerX} cy={centerY} r={rDoubleInner} fill="none" stroke="#22c55e" strokeWidth="3" />
+                <circle cx={centerX} cy={centerY - rDoubleOuter} r="8" fill="#00f0ff" stroke="#ffffff" strokeWidth="2" />
+                <circle cx={centerX} cy={centerY + rDoubleOuter} r="8" fill="#00f0ff" stroke="#ffffff" strokeWidth="2" />
+                <circle cx={centerX - rDoubleOuter} cy={centerY} r="8" fill="#00f0ff" stroke="#ffffff" strokeWidth="2" />
+                <circle cx={centerX + rDoubleOuter} cy={centerY} r="8" fill="#00f0ff" stroke="#ffffff" strokeWidth="2" />
+                <text x={centerX} y={centerY - rDoubleOuter - 18} textAnchor="middle" fill="#00f0ff" fontSize="18" fontWeight="900" style={{ filter: 'drop-shadow(0 0 4px #00f0ff)' }}>
+                  AJUSTER LE RAYON AUX DOUBLES
+                </text>
+              </g>
+            )}
+
+            {/* Étape 3 : Axe d'alignement du 20 */}
+            {calibrationStep === 3 && (
+              <g className="pointer-events-none">
+                {(() => {
+                  const rot = calibration.rotationAngle ?? 0;
+                  const topPos = polarToCartesian(centerX, centerY, rDoubleOuter * 1.15, 0, rot);
+                  return (
+                    <g>
+                      <line x1={centerX} y1={centerY} x2={topPos.x} y2={topPos.y} stroke="#eab308" strokeWidth="3.5" strokeDasharray="6, 4" />
+                      <circle cx={topPos.x} cy={topPos.y} r="12" fill="#eab308" stroke="#000000" strokeWidth="2" />
+                      <text x={topPos.x} y={topPos.y - 18} textAnchor="middle" fill="#eab308" fontSize="16" fontWeight="900" style={{ filter: 'drop-shadow(0 0 4px #eab308)' }}>
+                        AXE DU 20 : {(rot >= 0 ? '+' : '') + rot.toFixed(1)}°
+                      </text>
+                    </g>
+                  );
+                })()}
+              </g>
+            )}
           </>
         )}
 
@@ -2189,10 +2524,10 @@ export const ProjectorView: React.FC = () => {
       meanRadius = (rBullOuter + rTripleInner) / 2;
     }
 
-    return polarToCartesian(centerX, centerY, meanRadius, angle);
+    return polarToCartesian(centerX, centerY, meanRadius, angle, calibration.rotationAngle ?? 0);
   };
 
-  // --- Effet pour les animations de tir en réalité augmentée ---
+  // --- Effet 1 : Flash d'impact en cours de tour (1ère et 2ème fléchettes) ---
   useEffect(() => {
     if (!room || projectorMode !== 'ar') return;
     const activePlayer = room.players[room.activePlayerIndex];
@@ -2201,22 +2536,25 @@ export const ProjectorView: React.FC = () => {
     const currentThrows = activePlayer.currentRoundThrows || [];
     const throwsCount = activePlayer.throwsCount || 0;
 
-    // Si le joueur actif change, réinitialiser le suivi des lancers
+    // Si le joueur actif change, synchroniser le compteur sans couper l'animation de fin de tour du joueur précédent
     if (activePlayerNameRef.current !== activePlayer.name) {
       activePlayerNameRef.current = activePlayer.name;
       lastThrowsCountRef.current = throwsCount;
-      setAnimationActive(false);
-      setActiveAnimationIndex(-1);
-      setAnimatingDarts([]);
-      setGlobalRoundAnimation({ type: null, active: false });
-      setParticles([]);
-      setShowRoundPath(false);
       return;
     }
 
-    // 1. Détection d'un nouveau lancer en cours de tour (flash d'impact)
+    // Détection d'une annulation (Undo) sur le joueur courant
+    if (throwsCount < lastThrowsCountRef.current) {
+      lastThrowsCountRef.current = throwsCount;
+      return;
+    }
+
+    // Détection d'un nouveau lancer en cours de tour (flash d'impact cyan)
     if (throwsCount > lastThrowsCountRef.current) {
-      const latestThrow = currentThrows[throwsCount - 1] || currentThrows[currentThrows.length - 1];
+      // Dès qu'une nouvelle fléchette d'un nouveau tour est lancée, effacer le fil d'Ariane du tour précédent
+      stopRoundAnimations();
+
+      const latestThrow = currentThrows[currentThrows.length - 1];
       if (latestThrow && latestThrow !== '0' && latestThrow !== 'Loupé') {
         const segmentId = getSegmentIdFromLabel(latestThrow);
         if (segmentId) {
@@ -2229,85 +2567,121 @@ export const ProjectorView: React.FC = () => {
       }
       lastThrowsCountRef.current = throwsCount;
     }
+  }, [room?.activePlayerIndex, room?.players?.[room?.activePlayerIndex ?? 0]?.throwsCount, projectorMode]);
 
-    // 2. Détection de la fin du tour (dartsLeft === 0 ou 3 fléchettes lancées)
-    const isRoundFinished = activePlayer.dartsLeft === 0 && currentThrows.length > 0;
-    if (isRoundFinished && !animationActive && !showRoundPath) {
-      setAnimationActive(true);
-      setAnimatingDarts(currentThrows);
-      setActiveAnimationIndex(0);
-      setShowRoundPath(false);
-      setGlobalRoundAnimation({ type: null, active: false });
-      setParticles([]);
+  // --- Effet 2 : Animations AR de fin de tour X01 (180, Highscore 100+, Bust & Fil d'Ariane) ---
+  useEffect(() => {
+    if (!room) return;
 
-      let idx = 0;
-      const interval = setInterval(() => {
-        idx++;
-        if (idx < currentThrows.length) {
-          setActiveAnimationIndex(idx);
-        } else {
-          clearInterval(interval);
-          setActiveAnimationIndex(-1);
-          
-          // Fin de la révélation individuelle -> Déclencher l'animation globale
-          const getDartValue = (dart: string): number => {
-            if (!dart || dart === '0' || dart === 'Loupé') return 0;
-            if (dart === 'BULL' || dart === 'D25' || dart === '50') return 50;
-            if (dart === '25' || dart === 'S25') return 25;
-            if (dart.startsWith('T')) return parseInt(dart.substring(1)) * 3;
-            if (dart.startsWith('D')) return parseInt(dart.substring(1)) * 2;
-            if (dart.startsWith('S')) return parseInt(dart.substring(1));
-            return parseInt(dart) || 0;
-          };
-          
-          const roundSum = currentThrows.reduce((sum, dart) => sum + getDartValue(dart), 0);
-          const isBust = !!activePlayer.roundBust;
+    const totalMatchThrows = (room.players || []).reduce((acc, p) => acc + (p.throwsCount || 0), 0);
+    const completed = room.lastCompletedRound ?? null;
+    const currentRoundId = completed?.roundId ?? null;
 
-          // Activer le fil d'Ariane de fin de tour
-          setShowRoundPath(true);
-
-          if (isBust) {
-            setGlobalRoundAnimation({ type: 'bust', active: true });
-            setTimeout(() => {
-              setGlobalRoundAnimation({ type: null, active: false });
-            }, 3000);
-          } else if (roundSum === 180) {
-            setGlobalRoundAnimation({ type: '180', active: true });
-            
-            // Générer les particules d'explosion (70 particules jaillissant du centre)
-            const tempParticles: ARParticle[] = [];
-            for (let i = 0; i < 70; i++) {
-              const angle = Math.random() * Math.PI * 2;
-              const speed = 150 + Math.random() * 300; // vitesse en pixels/sec
-              tempParticles.push({
-                id: i,
-                x: calibration.centerX,
-                y: calibration.centerY,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed,
-                color: i % 3 === 0 ? '#ff007f' : (i % 3 === 1 ? '#eab308' : '#ffffff'), // Fuchsia, jaune or, blanc pur
-                radius: 3 + Math.random() * 5,
-                opacity: 0.95
-              });
-            }
-            setParticles(tempParticles);
-
-            setTimeout(() => {
-              setGlobalRoundAnimation({ type: null, active: false });
-              setParticles([]);
-            }, 4500);
-          } else if (roundSum >= 100) {
-            setGlobalRoundAnimation({ type: 'highscore', score: roundSum, active: true });
-            setTimeout(() => {
-              setGlobalRoundAnimation({ type: null, active: false });
-            }, 3500);
-          }
-
-          setAnimationActive(false);
-        }
-      }, 1800); // 1.8s par fléchette pour un rythme de révélation dynamique
+    // Si on n'est pas en X01 en cours de jeu, réinitialiser proprement
+    if (room.gameType !== 'x01' || (room.status !== 'playing' && room.status !== 'finished')) {
+      lastAnimatedRoundIdRef.current = currentRoundId;
+      totalMatchThrowsRef.current = totalMatchThrows;
+      stopRoundAnimations();
+      return;
     }
-  }, [room?.activePlayerIndex, room?.players?.[room?.activePlayerIndex ?? 0]?.throwsCount, room?.players?.[room?.activePlayerIndex ?? 0]?.dartsLeft, projectorMode]);
+
+    // Initialisation au premier chargement du salon : ne pas rejouer un ancien tour déjà terminé
+    if (lastAnimatedRoundIdRef.current === undefined) {
+      lastAnimatedRoundIdRef.current = currentRoundId;
+      totalMatchThrowsRef.current = totalMatchThrows;
+      return;
+    }
+
+    // Si le nombre total de lancers a diminué (Undo), stopper toute animation sans rejouer le tour précédent
+    if (totalMatchThrows < totalMatchThrowsRef.current) {
+      totalMatchThrowsRef.current = totalMatchThrows;
+      lastAnimatedRoundIdRef.current = currentRoundId;
+      stopRoundAnimations();
+      return;
+    }
+
+    totalMatchThrowsRef.current = totalMatchThrows;
+
+    if (currentRoundId === lastAnimatedRoundIdRef.current) return;
+    lastAnimatedRoundIdRef.current = currentRoundId;
+
+    if (!completed || !currentRoundId || projectorMode !== 'ar' || completed.throws.length === 0) {
+      stopRoundAnimations();
+      return;
+    }
+
+    // Lancement de la séquence de révélation fléchette par fléchette du tour terminé
+    stopRoundAnimations();
+    const roundThrows = [...completed.throws];
+    setAnimatingDarts(roundThrows);
+    setActiveAnimationIndex(0);
+
+    const finishRevelation = () => {
+      if (roundAnimIntervalRef.current) {
+        clearInterval(roundAnimIntervalRef.current);
+        roundAnimIntervalRef.current = null;
+      }
+      setActiveAnimationIndex(-1);
+      setShowRoundPath(true);
+
+      // Extinction automatique du fil d'Ariane après 4,5 s si le joueur suivant n'a pas encore lancé
+      const pathTimer = setTimeout(() => {
+        setShowRoundPath(false);
+        setAnimatingDarts([]);
+      }, 4500);
+      roundAnimTimersRef.current.push(pathTimer);
+
+      if (completed.isBust) {
+        setGlobalRoundAnimation({ type: 'bust', active: true });
+        const t = setTimeout(() => {
+          setGlobalRoundAnimation({ type: null, active: false });
+        }, 3000);
+        roundAnimTimersRef.current.push(t);
+      } else if (completed.score === 180) {
+        setGlobalRoundAnimation({ type: '180', active: true });
+
+        // Générer 70 particules d'explosion jaillissant du centre calibré
+        const tempParticles: ARParticle[] = [];
+        for (let i = 0; i < 70; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 150 + Math.random() * 300;
+          tempParticles.push({
+            id: i,
+            x: calibration.centerX,
+            y: calibration.centerY,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            color: i % 3 === 0 ? '#ff007f' : (i % 3 === 1 ? '#eab308' : '#ffffff'),
+            radius: 3 + Math.random() * 5,
+            opacity: 0.95,
+          });
+        }
+        setParticles(tempParticles);
+
+        const t = setTimeout(() => {
+          setGlobalRoundAnimation({ type: null, active: false });
+          setParticles([]);
+        }, 4500);
+        roundAnimTimersRef.current.push(t);
+      } else if (completed.score >= 100) {
+        setGlobalRoundAnimation({ type: 'highscore', score: completed.score, active: true });
+        const t = setTimeout(() => {
+          setGlobalRoundAnimation({ type: null, active: false });
+        }, 3500);
+        roundAnimTimersRef.current.push(t);
+      }
+    };
+
+    let idx = 0;
+    roundAnimIntervalRef.current = setInterval(() => {
+      idx++;
+      if (idx < roundThrows.length) {
+        setActiveAnimationIndex(idx);
+      } else {
+        finishRevelation();
+      }
+    }, 1100);
+  }, [room?.lastCompletedRound?.roundId, room?.gameType, room?.status, projectorMode, calibration.centerX, calibration.centerY]);
 
   // 1. Lire le code du salon depuis l'URL au chargement
   useEffect(() => {
@@ -2388,6 +2762,16 @@ export const ProjectorView: React.FC = () => {
     }
   }, [room?.projectorMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Synchronisation de la position de la cible (gauche/droite) depuis Firestore
+  useEffect(() => {
+    if (!room) return;
+    const firestoreTargetPos = room.targetPosition;
+    if (firestoreTargetPos && firestoreTargetPos !== targetPosition) {
+      setTargetPosition(firestoreTargetPos);
+      localStorage.setItem('minou_dart_target_position', firestoreTargetPos);
+    }
+  }, [room?.targetPosition]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Synchronisation de la calibration depuis Firestore (prioritaire en mode en ligne si non en train de calibrer localement)
   useEffect(() => {
     if (!room) return;
@@ -2401,28 +2785,22 @@ export const ProjectorView: React.FC = () => {
     }
   }, [room?.calibration, isCalibrating]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Nettoyer les timeouts Firestore lors du démontage du projecteur
+  // Nettoyer les timeouts Firestore et d'animations lors du démontage du projecteur
   useEffect(() => {
     return () => {
       if (firestoreTimeoutRef.current) {
         clearTimeout(firestoreTimeoutRef.current);
       }
+      if (roundAnimIntervalRef.current) {
+        clearInterval(roundAnimIntervalRef.current);
+      }
+      roundAnimTimersRef.current.forEach(t => clearTimeout(t));
     };
   }, []);
 
   const renderContent = () => {
-    // Rendu en cas de chargement
-    if (loading && !room) {
-      return (
-        <div className="w-full h-full overflow-hidden bg-black flex flex-col items-center justify-center text-white">
-          <div className="w-16 h-16 border-4 border-theme-accent border-t-transparent rounded-full animate-spin mb-4" />
-          <p className="text-lg font-medium tracking-wide">Initialisation de la liaison temps réel...</p>
-        </div>
-      );
-    }
-
-    // Rendu en cas d'erreur
-    if (error || !roomId) {
+    // Rendu en cas d'erreur explicite (vérifié avant loading/!room pour ne jamais masquer une erreur)
+    if (error || (!loading && !roomId)) {
       return (
         <div className="w-full h-full overflow-hidden bg-theme-bg text-theme-text-primary flex flex-col items-center justify-center p-6 text-center">
           <div className="max-w-md bg-black/40 border border-theme-border/40 p-8 rounded-2xl backdrop-blur">
@@ -2441,9 +2819,18 @@ export const ProjectorView: React.FC = () => {
       );
     }
 
-  const activePlayerIndex = room?.activePlayerIndex ?? 0;
-  const players = room?.players ?? [];
-  const status = room?.status ?? 'setup';
+    // Rendu en cas de chargement ou d'attente du premier snapshot du salon
+    if (loading || !room) {
+      return (
+        <div className="w-full h-full overflow-hidden bg-black flex flex-col items-center justify-center text-white">
+          <div className="w-16 h-16 border-4 border-theme-accent border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-lg font-medium tracking-wide">Initialisation de la liaison temps réel...</p>
+        </div>
+      );
+    }
+
+  const players = room.players ?? [];
+  const status = room.status ?? 'setup';
 
   const renderProjectorCricketMarkSymbol = (marks: number, allClosed: boolean) => {
     const numPlayers = room?.players.length ?? 0;
@@ -2488,12 +2875,14 @@ export const ProjectorView: React.FC = () => {
   // --- RENDU 1 : ÉCRAN D'ATTENTE (SETUP) ---
   if (status === 'setup' && room) {
     return (
-      <div className="w-full h-full flex m-0 p-0 overflow-hidden bg-black select-none">
-        {/* 1. MOITIÉ GAUCHE (50% de l'écran) : Éclairage de la cible physique ou cible de réalité augmentée */}
+      <div className={`w-full h-full flex ${targetPosition === 'right' ? 'flex-row-reverse' : 'flex-row'} m-0 p-0 overflow-hidden bg-black select-none`}>
+        {/* 1. Éclairage de la cible physique ou cible de réalité augmentée */}
         <div 
-          className={`w-1/2 h-full transition-all duration-500 shadow-[20px_0_40px_rgba(255,255,255,0.15)] z-10 flex flex-col relative overflow-hidden ${
+          className={`w-1/2 h-full transition-all duration-500 ${
+            targetPosition === 'right' ? 'shadow-[-20px_0_40px_rgba(255,255,255,0.15)]' : 'shadow-[20px_0_40px_rgba(255,255,255,0.15)]'
+          } z-10 flex flex-col relative overflow-hidden ${
             projectorMode === 'ar'
-              ? isCalibrating
+              ? isCalibrating && calibrationSubMode === 'white'
                 ? 'bg-white justify-center items-center p-0'
                 : 'bg-black justify-center items-center p-0'
               : 'bg-white justify-end items-center pb-6'
@@ -2585,7 +2974,7 @@ export const ProjectorView: React.FC = () => {
               {/* Bouton pour lancer la calibration (engrenage) */}
               {!isCalibrating && (
                 <button
-                  onClick={() => setIsCalibrating(true)}
+                  onClick={() => handleSetIsCalibrating(true)}
                   className="absolute top-4 right-4 p-2.5 bg-black/80 text-theme-accent hover:text-black rounded-xl hover:scale-105 transition-all border border-theme-border/30 hover:bg-theme-accent z-30 flex items-center justify-center cursor-pointer shadow-lg"
                   title="Lancer le calibrage de la cible"
                 >
@@ -2622,13 +3011,21 @@ export const ProjectorView: React.FC = () => {
           )}
         </div>
 
-        {/* Interface d'attente à droite */}
-        <div className="w-1/2 h-full bg-theme-bg text-theme-text-primary p-5 flex flex-col justify-between relative border-l border-theme-border/30">
+        {/* Interface d'attente (Scores & configuration) */}
+        <div className={`w-1/2 h-full bg-theme-bg text-theme-text-primary p-5 flex flex-col justify-between relative ${targetPosition === 'right' ? 'border-r' : 'border-l'} border-theme-border/30`}>
           {isCalibrating ? (
             renderProjectorCalibrationInterface()
           ) : (
             <>
               <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
+                <button
+                  onClick={() => handleToggleTargetPosition()}
+                  className="flex items-center gap-1.5 p-2 px-3 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700 font-bold text-xs transition-all cursor-pointer shadow-md"
+                  title={targetPosition === 'left' ? "Passer la cible à droite" : "Passer la cible à gauche"}
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-theme-accent" />
+                  <span className="hidden sm:inline">{targetPosition === 'left' ? 'Cible à droite' : 'Cible à gauche'}</span>
+                </button>
                 <a 
                   href={`#/remote?room=${room.roomId}`}
                   target="_blank"
@@ -2679,15 +3076,20 @@ export const ProjectorView: React.FC = () => {
                       };
                       const qrColors = getQrColors();
                       const remoteUrl = `${window.location.origin}${window.location.pathname}#/remote?room=${room.roomId}`;
-                      const qrCodeApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(remoteUrl)}&color=${qrColors.color}&bgcolor=${qrColors.bgcolor}&margin=6`;
                       return (
-                        <div className="p-2 bg-black/40 border border-theme-border/50 rounded-xl relative group flex flex-col items-center">
-                          <img 
-                            src={qrCodeApiUrl} 
-                            alt="QR Code de liaison" 
-                            className="w-[110px] h-[110px] rounded-lg transition-transform duration-300 group-hover:scale-105"
-                            loading="lazy"
-                          />
+                        <div className="p-2.5 bg-black/40 border border-theme-border/50 rounded-xl relative group flex flex-col items-center">
+                          <div
+                            className="p-1.5 rounded-lg transition-transform duration-300 group-hover:scale-105"
+                            style={{ backgroundColor: `#${qrColors.bgcolor}` }}
+                          >
+                            <QRCodeSVG
+                              value={remoteUrl}
+                              size={104}
+                              fgColor={`#${qrColors.color}`}
+                              bgColor={`#${qrColors.bgcolor}`}
+                              level="M"
+                            />
+                          </div>
                           <span className="text-[8px] text-theme-text-secondary uppercase tracking-wider block mt-2 text-center font-bold">
                             OU FLASHEZ ICI 📱
                           </span>
@@ -2734,10 +3136,12 @@ export const ProjectorView: React.FC = () => {
   // --- RENDU 2 : FIN DE PARTIE (CÉLÉBRATION) ---
   if (status === 'finished' && room) {
     return (
-      <div className="w-full h-full flex m-0 p-0 overflow-hidden bg-black select-none">
-        {/* Cible à gauche éclairée à 50% */}
-        <div className="w-1/2 h-full bg-white shadow-[20px_0_40px_rgba(255,255,255,0.15)] z-10 flex flex-col justify-end items-center pb-6">
-          {/* Logo bas gauche - zone blanche */}
+      <div className={`w-full h-full flex ${targetPosition === 'right' ? 'flex-row-reverse' : 'flex-row'} m-0 p-0 overflow-hidden bg-black select-none`}>
+        {/* Cible éclairée à 50% */}
+        <div className={`w-1/2 h-full bg-white ${
+          targetPosition === 'right' ? 'shadow-[-20px_0_40px_rgba(255,255,255,0.15)]' : 'shadow-[20px_0_40px_rgba(255,255,255,0.15)]'
+        } z-10 flex flex-col justify-end items-center pb-6`}>
+          {/* Logo bas - zone blanche */}
           <span
             className="italic text-xl text-zinc-950 font-serif tracking-widest opacity-50 select-none"
             style={{ fontFamily: "'Playfair Display', 'Didot', 'Georgia', serif" }}
@@ -2746,9 +3150,17 @@ export const ProjectorView: React.FC = () => {
           </span>
         </div>
 
-        {/* Interface vainqueur à droite */}
-        <div className="w-1/2 h-full bg-theme-bg text-theme-text-primary p-5 flex flex-col justify-between relative border-l border-theme-border/30">
+        {/* Interface vainqueur */}
+        <div className={`w-1/2 h-full bg-theme-bg text-theme-text-primary p-5 flex flex-col justify-between relative ${targetPosition === 'right' ? 'border-r' : 'border-l'} border-theme-border/30`}>
           <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
+            <button
+              onClick={() => handleToggleTargetPosition()}
+              className="flex items-center gap-1.5 p-2 px-3 rounded-full bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700 font-bold text-xs transition-all cursor-pointer shadow-md"
+              title={targetPosition === 'left' ? "Passer la cible à droite" : "Passer la cible à gauche"}
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5 text-theme-accent" />
+              <span className="hidden sm:inline">{targetPosition === 'left' ? 'Cible à droite' : 'Cible à gauche'}</span>
+            </button>
             <a 
               href={`#/remote?room=${room.roomId}`}
               target="_blank"
@@ -2776,9 +3188,13 @@ export const ProjectorView: React.FC = () => {
             <div className="w-24 h-[2px] bg-theme-accent mb-3" />
 
             <p className="text-xs text-theme-text-secondary max-w-sm mb-3 leading-relaxed">
-              {room.gameType === 'cricket' 
+              {room.gameType === 'cricket'
                 ? "Félicitations ! Toutes les cibles du Cricket ont été fermées."
-                : `Félicitations ! Le score cible de ${room.targetScore} a été atteint.`
+                : room.gameType === 'clock'
+                  ? "Félicitations ! Le tour complet de l'horloge a été validé."
+                  : room.gameType === 'bart'
+                    ? "Félicitations ! Le match de Bart a été remporté."
+                    : `Félicitations ! Le score cible de ${room.targetScore} points a été atteint.`
               }
             </p>
 
@@ -2803,6 +3219,13 @@ export const ProjectorView: React.FC = () => {
                           <th className="pb-2 text-center">T. Blancs</th>
                           <th className="pb-2 text-center">Best T.</th>
                         </tr>
+                      ) : room.gameType === 'clock' ? (
+                        <tr className="border-b border-theme-border/20 text-zinc-500 font-bold uppercase tracking-wider text-[9px] md:text-[10px]">
+                          <th className="pb-2">Joueur</th>
+                          <th className="pb-2 text-center">Progression</th>
+                          <th className="pb-2 text-center">Précision</th>
+                          <th className="pb-2 text-center">Fléchettes</th>
+                        </tr>
                       ) : (
                         <tr className="border-b border-theme-border/20 text-zinc-500 font-bold uppercase tracking-wider text-[9px] md:text-[10px]">
                           <th className="pb-2">Joueur</th>
@@ -2825,17 +3248,33 @@ export const ProjectorView: React.FC = () => {
                                 {p.avg.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
                               <td className="py-2.5 text-center font-bold text-white">
-                                {p.accuracy !== undefined ? `${p.accuracy.toLocaleString('fr-FR', { maximumFractionDigits: 0 })}%` : '-'}
+                                {p.accuracy !== undefined ? `${p.accuracy.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} %` : '-'}
                               </td>
                               <td className="py-2.5 text-center text-red-400">{p.missedDarts || 0}</td>
                               <td className="py-2.5 text-center text-zinc-500">{p.whiteRounds || 0}</td>
                               <td className="py-2.5 text-center text-yellow-500">{p.bestCricketRound || 0}</td>
                             </>
+                          ) : room.gameType === 'clock' ? (
+                            <>
+                              <td className="py-2.5 text-center font-bold text-white">
+                                {p.name === room.winnerName
+                                  ? 'Fini 🏆'
+                                  : `Cible ${p.clockState?.currentTarget === 25 ? 'Bulle' : (p.clockState?.currentTarget ?? 1)}`}
+                              </td>
+                              <td className="py-2.5 text-center font-bold text-theme-accent">
+                                {(p.clockState?.accuracy ?? 0).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %
+                              </td>
+                              <td className="py-2.5 text-center text-zinc-400">
+                                {p.clockState?.throwsCount ?? p.throwsCount}
+                              </td>
+                            </>
                           ) : (
                             <>
                               <td className="py-2.5 text-center font-bold text-theme-accent">
                                 {room.gameType === 'bart' 
-                                  ? (p.bartState && p.bartState.servesPlayed > 0 ? `${((p.bartState.servesWon / p.bartState.servesPlayed) * 100).toFixed(0)}%` : '-') 
+                                  ? (p.bartState && p.bartState.servesPlayed > 0
+                                      ? `${((p.bartState.servesWon / p.bartState.servesPlayed) * 100).toLocaleString('fr-FR', { maximumFractionDigits: 0 })} %`
+                                      : '-') 
                                   : p.avg.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
                               <td className="py-2.5 text-center font-bold text-white">
@@ -2920,18 +3359,20 @@ export const ProjectorView: React.FC = () => {
   };
 
   // --- RENDU 3 : EN COURS DE JEU (PLAYING) ---
-  if (room?.gameType === 'bart') {
+  if (room.gameType === 'bart') {
     return (
       <BartProjectorGame 
         room={room} 
         projectorMode={projectorMode} 
         setProjectorMode={setProjectorMode} 
+        targetPosition={targetPosition}
+        setTargetPosition={handleToggleTargetPosition}
         showModeSelector={showModeSelector} 
         setShowModeSelector={setShowModeSelector} 
         renderCalibratedDartboard={renderCalibratedDartboard}
         calibration={calibration}
         isCalibrating={isCalibrating}
-        setIsCalibrating={setIsCalibrating}
+        setIsCalibrating={handleSetIsCalibrating}
         calibrationStep={calibrationStep}
         renderProjectorCalibrationInterface={renderProjectorCalibrationInterface}
         lastCalibrationHit={lastCalibrationHit}
@@ -2940,18 +3381,20 @@ export const ProjectorView: React.FC = () => {
     );
   }
 
-  if (room?.gameType === 'clock') {
+  if (room.gameType === 'clock') {
     return (
       <ClockProjectorGame
         room={room}
         projectorMode={projectorMode}
         setProjectorMode={setProjectorMode}
+        targetPosition={targetPosition}
+        setTargetPosition={handleToggleTargetPosition}
         showModeSelector={showModeSelector}
         setShowModeSelector={setShowModeSelector}
         renderCalibratedDartboard={renderCalibratedDartboard}
         calibration={calibration}
         isCalibrating={isCalibrating}
-        setIsCalibrating={setIsCalibrating}
+        setIsCalibrating={handleSetIsCalibrating}
         calibrationStep={calibrationStep}
         renderProjectorCalibrationInterface={renderProjectorCalibrationInterface}
         lastCalibrationHit={lastCalibrationHit}
@@ -2960,918 +3403,47 @@ export const ProjectorView: React.FC = () => {
     );
   }
 
-  const renderGameAnimationDetails = (isDarkTheme: boolean, isAbsolute: boolean = false) => {
-    if (!room) return null;
-
-    const progBgClass = isDarkTheme ? "bg-zinc-900/90 border-zinc-700/80 shadow-xl backdrop-blur-md" : "bg-zinc-50/90 border-zinc-200/80 shadow-md";
-    const progTextClass = isDarkTheme ? "text-zinc-300" : "text-zinc-700";
-    const progHeaderClass = isDarkTheme ? "text-zinc-400" : "text-zinc-650";
-    const progTitleClass = isDarkTheme ? "text-zinc-300" : "text-zinc-500";
-    const progDividerClass = isDarkTheme ? "border-zinc-700" : "border-zinc-200";
-    const progLineBgClass = isDarkTheme ? "bg-zinc-700/50" : "bg-zinc-200";
-    const progLineFillClass = isDarkTheme ? "bg-zinc-500" : "bg-zinc-400";
-    const curBgClass = isDarkTheme ? "bg-zinc-800 border-zinc-600 text-white" : "bg-white border-zinc-350";
-
+  if (room.gameType === 'cricket') {
     return (
-      <div className={`w-full px-8 flex flex-col gap-4 ${isAbsolute ? 'absolute bottom-6 left-0 z-20 pointer-events-none' : 'pb-6'}`}>
-        <div className="pointer-events-auto flex flex-col gap-4 w-full">
-          {room?.gameType === 'x01' && (
-            <>
-              {/* Encart de suggestion de finition pour le joueur actif (EN HAUT) */}
-              {(() => {
-                const activePlayer = players[activePlayerIndex];
-                if (!activePlayer || activePlayer.score > 180 || activePlayer.score <= 1) return null;
-                const suggestion = getCheckoutSuggestion(activePlayer.score, !!room.doubleOut);
-                if (!suggestion || suggestion.length === 0) return null;
-
-                const renderProjectorCheckoutDartBadge = (dart: string) => {
-                  let bgClass = 'bg-zinc-800 text-zinc-200 border-zinc-700';
-                  let display = dart;
-
-                  if (dart.startsWith('T')) {
-                    bgClass = 'bg-red-600/90 text-white border-red-500 shadow-sm shadow-red-900/30';
-                    display = `T${dart.substring(1)}`;
-                  } else if (dart.startsWith('D')) {
-                    bgClass = 'bg-yellow-500 text-black border-yellow-400 font-extrabold shadow-sm shadow-yellow-900/20';
-                    display = `D${dart.substring(1)}`;
-                  } else if (dart.startsWith('S')) {
-                    bgClass = 'bg-zinc-800 text-zinc-300 border-zinc-750';
-                    display = `S${dart.substring(1)}`;
-                  } else if (dart === 'BULL') {
-                    bgClass = 'bg-red-600 text-white border-red-500 shadow-sm shadow-red-900/40 font-extrabold';
-                    display = 'BULL';
-                  }
-
-                  return (
-                    <span 
-                      key={dart} 
-                      className={`px-4 py-1.5 rounded-xl border font-black uppercase tracking-wider ${bgClass}`}
-                      style={{ fontSize: `${Math.round((calibration?.commentsFontSize ?? 18) * 0.85)}px` }}
-                    >
-                      {display}
-                    </span>
-                  );
-                };
-
-                return (
-                  <div className={`w-full bg-zinc-950 text-white p-4 rounded-3xl border-2 border-theme-accent flex items-center justify-between gap-4 ${isDarkTheme ? 'shadow-[0_0_30px_rgba(255,255,255,0.1)] backdrop-blur-md' : 'shadow-[0_0_20px_rgba(255,255,255,0.05)]'}`}>
-                    <div className="flex flex-col">
-                      <span 
-                        className="text-theme-accent font-black uppercase tracking-widest"
-                        style={{ fontSize: `${Math.round((calibration?.commentsFontSize ?? 18) * 0.55)}px` }}
-                      >
-                        Finition Suggérée ({activePlayer.name})
-                      </span>
-                      <span 
-                        className="font-black mt-0.5 tracking-tight text-white"
-                        style={{ fontSize: `${calibration?.commentsFontSize ?? 18}px` }}
-                      >
-                        {activePlayer.score} points restants
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {suggestion.map((dart, idx) => (
-                        <React.Fragment key={idx}>
-                          {idx > 0 && (
-                            <span 
-                              className="text-zinc-650 font-black"
-                              style={{ fontSize: `${Math.round((calibration?.commentsFontSize ?? 18) * 0.8)}px` }}
-                            >
-                              ➔
-                            </span>
-                          )}
-                          {renderProjectorCheckoutDartBadge(dart)}
-                        </React.Fragment>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Règle de progression X01 (EN BAS) */}
-              <div className="flex flex-col gap-4">
-                <div 
-                  className={`uppercase tracking-widest text-center flex items-center justify-between border-b pb-2 ${progHeaderClass} ${progDividerClass}`}
-                  style={{ fontSize: `${Math.round((calibration?.commentsFontSize ?? 18) * 0.65)}px` }}
-                >
-                  <span>{room.targetScore} (Départ)</span>
-                  <span className={`font-black ${progTitleClass}`} style={{ fontSize: `${Math.round((calibration?.commentsFontSize ?? 18) * 0.75)}px` }}>Progression du Match</span>
-                  <span>0 (Arrivée)</span>
-                </div>
-                
-                <div className={`space-y-4 w-full p-5 rounded-2xl border ${progBgClass}`}>
-                  {players.map((player, idx) => {
-                    const isActive = idx === activePlayerIndex;
-                    const progressPercentage = Math.max(0, Math.min(100, (((room.targetScore - player.score) / room.targetScore) * 100)));
-                    
-                    return (
-                      <div key={player.name} className="flex flex-col gap-1.5 w-full">
-                        <div 
-                          className={`flex justify-between font-bold px-1 ${progTextClass}`}
-                          style={{ fontSize: `${Math.round((calibration?.commentsFontSize ?? 18) * 0.7)}px` }}
-                        >
-                          <span className="uppercase flex items-center gap-1">
-                            <span>{player.name}</span>
-                            <span>{player.emoji || '🎯'}</span>
-                          </span>
-                          <span>{player.score} restants</span>
-                        </div>
-                        <div className={`relative w-full h-2.5 rounded-full overflow-visible border border-zinc-300/30 ${progLineBgClass}`}>
-                          <div 
-                            className={`absolute top-0 left-0 h-full rounded-full transition-all duration-500 ${
-                              isActive ? 'bg-[#22c55e]' : progLineFillClass
-                            }`}
-                            style={{ width: `${progressPercentage}%` }}
-                          />
-                          <div 
-                            className={`absolute -top-3.5 -translate-x-1/2 w-9 h-9 rounded-full border-2 flex items-center justify-center text-lg shadow-lg transition-all duration-500 cursor-default select-none ${
-                              isActive 
-                                ? 'bg-zinc-950 border-[#22c55e] scale-110 z-10' 
-                                : `${curBgClass} scale-100 opacity-90`
-                            }`}
-                            style={{ left: `${progressPercentage}%` }}
-                          >
-                            {player.emoji || '🎯'}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Règle de progression Cricket */}
-          {room?.gameType === 'cricket' && (
-            <div className="flex flex-col gap-4">
-              <div 
-                className={`uppercase tracking-widest text-center flex items-center justify-between border-b pb-2 ${progHeaderClass} ${progDividerClass}`}
-                style={{ fontSize: `${Math.round((calibration?.commentsFontSize ?? 18) * 0.65)}px` }}
-              >
-                <span>0 (Début)</span>
-                <span className={`font-black ${progTitleClass}`} style={{ fontSize: `${Math.round((calibration?.commentsFontSize ?? 18) * 0.75)}px` }}>Cibles Fermées (Cricket)</span>
-                <span>{room.cricketTargets?.length || 7} (Fermé)</span>
-              </div>
-              
-              <div className={`space-y-4 w-full p-5 rounded-2xl border ${progBgClass}`}>
-                {players.map((player, idx) => {
-                  const isActive = idx === activePlayerIndex;
-                  const targets = room.cricketTargets || [];
-                  const closedCount = targets.filter(t => (player.cricketMarks?.[String(t)] || 0) >= 3).length;
-                  const progressPercentage = targets.length > 0 ? (closedCount / targets.length) * 100 : 0;
-                  
-                  return (
-                    <div key={player.name} className="flex flex-col gap-1.5 w-full">
-                      <div 
-                        className={`flex justify-between font-bold px-1 ${progTextClass}`}
-                        style={{ fontSize: `${Math.round((calibration?.commentsFontSize ?? 18) * 0.7)}px` }}
-                      >
-                        <span className="uppercase flex items-center gap-1">
-                          <span>{player.name}</span>
-                          <span>{player.emoji || '🎯'}</span>
-                        </span>
-                        <span>{closedCount} / {targets.length} cibles</span>
-                      </div>
-                      <div className={`relative w-full h-2.5 rounded-full overflow-visible border border-zinc-300/30 ${progLineBgClass}`}>
-                        <div 
-                          className={`absolute top-0 left-0 h-full rounded-full transition-all duration-500 ${
-                            isActive ? 'bg-[#22c55e]' : progLineFillClass
-                          }`}
-                          style={{ width: `${progressPercentage}%` }}
-                        />
-                        <div 
-                          className={`absolute -top-3.5 -translate-x-1/2 w-9 h-9 rounded-full border-2 flex items-center justify-center text-lg shadow-lg transition-all duration-500 cursor-default select-none ${
-                            isActive 
-                              ? 'bg-zinc-950 border-[#22c55e] scale-110 z-10' 
-                              : `${curBgClass} scale-100 opacity-90`
-                          }`}
-                          style={{ left: `${progressPercentage}%` }}
-                        >
-                          {player.emoji || '🎯'}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      <CricketProjectorGame
+        room={room}
+        projectorMode={projectorMode}
+        setProjectorMode={setProjectorMode}
+        targetPosition={targetPosition}
+        setTargetPosition={handleToggleTargetPosition}
+        showModeSelector={showModeSelector}
+        setShowModeSelector={setShowModeSelector}
+        renderCalibratedDartboard={renderCalibratedDartboard}
+        calibration={calibration}
+        isCalibrating={isCalibrating}
+        setIsCalibrating={handleSetIsCalibrating}
+        calibrationStep={calibrationStep}
+        renderProjectorCalibrationInterface={renderProjectorCalibrationInterface}
+        lastCalibrationHit={lastCalibrationHit}
+        renderStatsCalibrationOverlay={renderStatsCalibrationOverlay}
+        renderProjectorCricketMarkSymbol={renderProjectorCricketMarkSymbol}
+      />
     );
   }
 
   return (
-    <div className="w-full h-full flex m-0 p-0 overflow-hidden bg-black select-none relative">
-      
-      {/* 1. MOITIÉ GAUCHE (50% de l'écran) : Éclairage de la cible physique */}
-      {projectorMode !== 'fullscreen' && (
-        <div 
-          className={`w-1/2 h-full transition-all duration-500 shadow-[20px_0_40px_rgba(255,255,255,0.15)] z-10 flex flex-col relative overflow-hidden ${
-            projectorMode === 'ar'
-              ? isCalibrating
-                ? 'bg-white justify-center items-center p-0'
-                : 'bg-black justify-center items-center p-0'
-              : 'bg-white justify-end items-center pb-6'
-          }`}
-          id="projector-spotlight"
-        >
-          {projectorMode === 'ar' ? (
-            <>
-              {/* Cible SVG de réalité augmentée (forcée dans la moitié supérieure, soit le 1/4 supérieur gauche de l'écran total) */}
-              <div className="w-full h-1/2 flex items-center justify-center relative overflow-visible">
-                {renderCalibratedDartboard(isCalibrating)}
-              </div>
-
-              {/* Placeholder Zone Stats pour l'étape 9 (AR Setup) */}
-              {isCalibrating && calibrationStep === 9 && statsCalibrationState === 'none' && (
-                <div 
-                  className="absolute bg-zinc-300/80 border-2 border-dashed border-zinc-500 rounded-3xl p-6 shadow-xl backdrop-blur-md z-40 transition-all duration-200 pointer-events-none"
-                  style={
-                    calibration.statsPanelHeight !== undefined
-                      ? {
-                          left: `${calibration.statsPanelX ?? 16}px`,
-                          top: `${calibration.statsPanelY ?? 250}px`,
-                          width: `${calibration.statsPanelWidth ?? 320}px`,
-                          height: `${calibration.statsPanelHeight ?? 280}px`,
-                        }
-                      : { 
-                          left: `${calibration?.statsPanelX ?? 16}px`,
-                          top: `calc(50% + ${calibration?.statsPanelY ?? 0}px)`, 
-                          transform: 'translateY(-50%)',
-                          width: '320px',
-                          minHeight: '280px' 
-                        }
-                  }
-                >
-                  <div 
-                    className="font-black text-zinc-800 uppercase text-center w-full truncate"
-                    style={{ fontSize: `${calibration.statsFontSize ?? 16}px`, marginBottom: '10px' }}
-                  >
-                    EXEMPLE DE TITRE
-                  </div>
-                  <div 
-                    className="font-bold text-zinc-700 leading-snug overflow-hidden text-ellipsis"
-                    style={{ fontSize: `${calibration.commentsFontSize ?? 14}px` }}
-                  >
-                    Ceci est une phrase de commentaire générée automatiquement. Elle s'adapte à la taille de la boîte pour que le joueur puisse la lire facilement depuis le pas de tir.
-                  </div>
-                  <div 
-                    className="font-medium text-zinc-600 leading-snug mt-2 overflow-hidden text-ellipsis"
-                    style={{ fontSize: `${calibration.commentsFontSize ?? 14}px` }}
-                  >
-                    Une autre information importante apparaîtra ici selon les besoins du jeu.
-                  </div>
-                </div>
-              )}
-
-              {/* Zone transparente de capture pour tracer le panneau de commentaires */}
-              {statsCalibrationState !== 'none' && (
-                <div 
-                  className="absolute inset-0 z-50 cursor-crosshair bg-black/10"
-                  onPointerDown={handleStatsPointerDown}
-                  onPointerMove={handleStatsPointerMove}
-                >
-                  {/* Guide de tracé rouge en direct si on est en train de tracer le second point */}
-                  {statsCalibrationState === 'bottom-right' && statsStartPointRef.current && (
-                    <div 
-                      className="absolute border-2 border-dashed border-red-550 bg-red-500/10 rounded-2xl pointer-events-none"
-                      style={{
-                        left: `${liveStatsRect ? liveStatsRect.x : (calibration.statsPanelX ?? 0)}px`,
-                        top: `${liveStatsRect ? liveStatsRect.y : (calibration.statsPanelY ?? 0)}px`,
-                        width: `${liveStatsRect ? liveStatsRect.width : (calibration.statsPanelWidth ?? 0)}px`,
-                        height: `${liveStatsRect ? liveStatsRect.height : (calibration.statsPanelHeight ?? 0)}px`
-                      }}
-                    />
-                  )}
-                  <div className="absolute top-4 left-4 bg-black/85 text-white border border-red-500/40 px-3.5 py-1.5 rounded-full text-xs font-black shadow-lg animate-pulse pointer-events-none">
-                    🎯 {statsCalibrationState === 'top-left' ? 'Cliquez pour le coin HAUT-GAUCHE' : 'Glissez/cliquez pour le coin BAS-DROITE'}
-                  </div>
-                </div>
-              )}
-
-
-              {/* Bouton pour lancer la calibration (engrenage) */}
-              {!isCalibrating && (
-                <button
-                  onClick={() => setIsCalibrating(true)}
-                  className="absolute top-4 right-4 p-2.5 bg-black/80 text-theme-accent hover:text-black rounded-xl hover:scale-105 transition-all border border-theme-border/30 hover:bg-theme-accent z-30 flex items-center justify-center cursor-pointer shadow-lg"
-                  title="Lancer le calibrage de la cible"
-                >
-                  <Settings className="w-5 h-5" />
-                </button>
-              )}
-
-              {/* Interface de calibration déplacée à droite */}
-              
-              {/* Notification d'impact de jeu normal (quand non calibration) */}
-              {!isCalibrating && lastCalibrationHit && (
-                <div 
-                  className="absolute bg-black/90 text-white border-2 border-theme-accent px-4 py-2 rounded-2xl shadow-xl z-30 text-xs font-bold animate-fadeIn pointer-events-none"
-                  style={{ top: '52%', left: '50%', transform: 'translateX(-50%)' }}
-                >
-                  🎯 Touché : <span className="text-theme-accent">{lastCalibrationHit.region}</span> &bull; Score : <span className="text-[#22c55e]">{lastCalibrationHit.score}</span>
-                </div>
-              )}
-
-              {/* Affichage des détails d'animation en AR */}
-              {!isCalibrating && renderGameAnimationDetails(true, true)}
-            </>
-          ) : (
-            <>
-              {/* RÈGLAGES CLASSIQUES (VUE ANCIENNE) */}
-              {/* Logo Minou Dart Game */}
-              <span 
-                className="italic text-xl text-zinc-950 font-serif tracking-widest opacity-50 select-none mb-4"
-                style={{ fontFamily: "'Playfair Display', 'Didot', 'Georgia', serif" }}
-              >
-                Minou Dart Game
-              </span>
-
-              {/* Affichage des détails d'animation en vue Classique */}
-              {renderGameAnimationDetails(false, false)}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* 2. MOITIÉ DROITE : Interface Sombre */}
-      <div 
-        className={`${projectorMode === 'fullscreen' ? 'w-full' : 'w-1/2'} h-full bg-theme-bg text-theme-text-primary transition-all duration-300 p-4 md:p-5 flex flex-col justify-between relative border-l border-theme-border/30`}
-        id="projector-interface"
-      >
-        {isCalibrating ? (
-          renderProjectorCalibrationInterface()
-        ) : (
-          <>
-            <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
-          <a 
-            href={`#/remote?room=${room?.roomId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 p-2 px-3.5 rounded-full bg-theme-accent/20 hover:bg-theme-accent text-theme-accent hover:text-black border border-theme-accent/30 font-bold text-xs transition-all duration-300 cursor-pointer"
-            title="Ouvrir la télécommande de saisie"
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>Saisie Télécommande</span>
-          </a>
-          <a 
-            href="#/" 
-            className="p-2 rounded-full bg-black/40 hover:bg-black/80 border border-theme-border/30 hover:border-theme-accent text-theme-text-secondary hover:text-theme-accent transition-all duration-300"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </a>
-        </div>
-
-        {/* --- ZONE SUPÉRIEURE : Scores & Statistiques (Prend 85% de l'espace disponible) --- */}
-        <div className="flex-grow flex flex-col justify-start min-h-0 overflow-hidden">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="w-2 h-2 rounded-full bg-theme-accent animate-ping" />
-            <h2 className={`text-xs font-bold tracking-widest text-theme-text-secondary uppercase ${
-              theme === 'arcade' ? 'neon-glow-pink-text font-mono' : ''
-            }`}>
-              {room?.gameType === 'cricket' 
-                ? `CRICKET ${room?.cricketVariant === 'classic' ? 'CLASSIQUE' : room?.cricketVariant === 'crazy' ? 'CRAZY' : 'TACTICAL'}` 
-                : `MODE ${room?.targetScore}`
-              } &bull; SALON : {room?.roomId}
-            </h2>
-          </div>
-
-          {room?.gameType === 'cricket' && room?.cricketTargets ? (
-            /* ═══ GRILLE VERTICALE DE CRICKET (STYLISÉE 16/9) ═══ */
-            <div className="flex-grow flex flex-col justify-between min-h-0 select-none w-full">
-              <table 
-                className="w-full border-collapse table-fixed flex-grow"
-                style={{ fontSize: `${calibration?.statsFontSize ?? 16}px` }}
-              >
-                <thead>
-                  <tr className="border-b border-theme-border/20">
-                    {/* Colonne des cibles (vide en en-tête) */}
-                    <th className="w-[80px] md:w-[100px] pb-1"></th>
-                    
-                    {/* En-têtes Joueurs */}
-                    {players.map((player, idx) => {
-                      const isActive = idx === activePlayerIndex;
-                      const numPlayers = players.length;
-                      
-                      const baseSize = calibration?.statsFontSize ?? 16;
-                      const nameStyle = { fontSize: `${Math.round(baseSize * (numPlayers > 4 ? 0.8 : numPlayers > 2 ? 0.9 : 1.1))}px` };
-                      const scoreStyle = { fontSize: `${Math.round(baseSize * (numPlayers > 4 ? 1.1 : numPlayers > 2 ? 1.3 : 1.7))}px` };
-                      let headerHeight = 'min-h-[70px]';
-                      
-                      if (numPlayers > 4) {
-                        headerHeight = 'min-h-[55px]';
-                      }
-
-                      return (
-                        <th 
-                          key={player.name} 
-                          className={`pb-2 px-1 text-center transition-all duration-300 relative ${
-                            isActive ? 'bg-theme-accent/5' : ''
-                          }`}
-                        >
-                          <div className={`flex flex-col items-center justify-center gap-0.5 py-1 ${headerHeight}`}>
-                            {isActive ? (
-                              <div className="flex items-center gap-1 bg-theme-accent text-black font-black text-[9px] md:text-xs px-2.5 py-0.5 rounded-full uppercase tracking-wider animate-pulse">
-                                <Zap className="w-2.5 h-2.5 fill-current" /> Actif
-                              </div>
-                            ) : (
-                              /* Spacer invisible pour maintenir l'alignement vertical */
-                              <div className="h-5 opacity-0 select-none">-</div>
-                            )}
-                            <span 
-                              className={`font-black uppercase tracking-wider truncate max-w-full block ${
-                                isActive ? 'text-theme-accent' : 'text-theme-text-primary'
-                              } ${theme === 'arcade' ? 'font-mono' : ''}`}
-                              style={nameStyle}
-                            >
-                              {player.name}
-                            </span>
-                            <span 
-                              className={`font-black block ${
-                                isActive ? 'text-theme-accent' : 'text-theme-text-primary'
-                              } ${theme === 'arcade' ? 'neon-glow-text font-mono' : ''}`}
-                              style={scoreStyle}
-                            >
-                              {player.score || 0}
-                            </span>
-                          </div>
-                          {/* Ligne d'activation brillante */}
-                          <div className={`absolute bottom-0 left-2 right-2 h-[3px] rounded-full transition-all duration-300 ${
-                            isActive ? 'bg-theme-accent' : 'bg-transparent'
-                          }`} />
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                
-                <tbody>
-                  {room.cricketTargets.map((target) => {
-                    const isBull = target === 25;
-                    const targetLabel = isBull ? 'Bull' : String(target);
-                    
-                    // Vérifier si tous les joueurs ont fermé cette cible
-                    const allClosed = players.every(p => (p.cricketMarks?.[String(target)] || 0) >= 3);
-                    
-                    return (
-                      <tr 
-                        key={target} 
-                        className={`border-b transition-all duration-500 ${
-                          allClosed 
-                            ? 'border-green-900/40 bg-green-950/20' 
-                            : 'border-theme-border/10'
-                        }`}
-                      >
-                        {/* Colonne Cibles (Badge vertical compact) */}
-                        <td className="p-0.5 text-center align-middle">
-                          <div 
-                            className={`w-full py-1 md:py-1.5 rounded-xl font-black text-center shadow-md transition-all relative overflow-hidden ${
-                              allClosed 
-                                ? 'bg-green-950/40 text-green-700 border border-green-900/50'
-                                : isBull 
-                                  ? 'bg-red-600 text-white border border-red-500 shadow-red-600/10' 
-                                  : 'bg-green-600 text-white border border-green-500 shadow-green-600/10'
-                            }`}
-                            style={{ fontSize: `${Math.round((calibration?.statsFontSize ?? 16) * 1.25)}px` }}
-                          >
-                            {targetLabel}
-                            {/* Barre diagonale de fermeture */}
-                            {allClosed && (
-                              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                <div className="w-full h-[2px] bg-green-600/50 rotate-[-20deg] rounded-full" />
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        
-                        {/* Marques des joueurs */}
-                        {players.map((player, idx) => {
-                          const marks = player.cricketMarks?.[String(target)] || 0;
-                          const isActive = idx === activePlayerIndex;
-                          return (
-                            <td 
-                              key={player.name} 
-                              className={`p-1 text-center align-middle transition-colors ${
-                                allClosed 
-                                  ? 'opacity-40' 
-                                  : isActive 
-                                    ? 'bg-theme-accent/5' 
-                                    : ''
-                              }`}
-                            >
-                              <div className="flex justify-center items-center h-7 md:h-8 lg:h-9">
-                                {renderProjectorCricketMarkSymbol(marks, allClosed)}
-                              </div>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-
-                {/* FOOTER : Statistiques condensées sur une seule ligne */}
-                <tfoot>
-                  <tr className="border-t-2 border-theme-border/30 bg-black/30">
-                    <td className="p-1 text-center align-middle border-r border-theme-border/10">
-                      <div 
-                        className="font-black text-zinc-500 uppercase tracking-widest leading-tight text-center"
-                        style={{ fontSize: `${Math.round((calibration?.statsFontSize ?? 16) * 0.65)}px` }}
-                      >
-                        Stats
-                      </div>
-                    </td>
-                    {players.map((player, idx) => {
-                      const isActive = idx === activePlayerIndex;
-                      const roundThrows = player.currentRoundThrows || [];
-                      return (
-                        <td 
-                          key={player.name} 
-                          className={`p-1 text-center align-middle transition-colors ${
-                            isActive ? 'bg-theme-accent/5' : ''
-                          }`}
-                        >
-                          {/* Ligne des statistiques */}
-                          <div 
-                            className="flex flex-wrap items-center justify-center gap-x-1.5 md:gap-x-3 gap-y-0.5 font-bold text-zinc-350 mb-1.5 leading-tight"
-                            style={{ fontSize: `${Math.round((calibration?.statsFontSize ?? 16) * 0.75)}px` }}
-                          >
-                            <span>{players.length >= 5 ? 'Lanc.' : 'Lancers'}: <strong className="text-white font-black">{player.throwsCount}</strong></span>
-                            <span className="text-zinc-700">|</span>
-                            <span>{players.length >= 5 ? 'Loup.' : 'Loupées'}: <strong className="text-red-400 font-black">{player.missedDarts || 0}</strong></span>
-                            <span className="text-zinc-700">|</span>
-                            <span>Préc.: <strong className="text-white font-black">{player.accuracy !== undefined ? `${player.accuracy.toLocaleString('fr-FR', { maximumFractionDigits: 0 })}%` : '-'}</strong></span>
-                            <span className="text-zinc-700">|</span>
-                            <span>MPR: <strong className="text-theme-accent font-black">{player.avg.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-                          </div>
-                          
-                          {/* Boîtes de lancer du tour */}
-                          <div className="flex gap-1 justify-center mb-0.5">
-                            {[0, 1, 2].map((i) => {
-                              const throwLabel = roundThrows[i] || '';
-                              const displayLabel = throwLabel === '0' ? 'Loupé' : throwLabel;
-                              
-                              // Tailles adaptatives pour les boîtes de lancer
-                              const boxWidth = players.length >= 5 ? 'w-10 h-7 md:w-11 md:h-8.5' : 'w-14 h-9 md:w-16 md:h-11';
-                              
-                              return (
-                                <div 
-                                  key={i} 
-                                  className={`${boxWidth} rounded-lg border-2 flex items-center justify-center font-black transition-all ${
-                                    throwLabel 
-                                      ? throwLabel === '0'
-                                        ? 'border-red-950 bg-red-950/20 text-red-400 font-extrabold uppercase text-[7.5px] md:text-[9px]'
-                                        : 'border-theme-accent/50 bg-black/80 text-theme-accent font-extrabold shadow-md' 
-                                      : 'border-zinc-850 bg-zinc-950/10 text-transparent'
-                                  }`}
-                                  style={{ fontSize: `${Math.round((calibration?.statsFontSize ?? 16) * 0.7)}px` }}
-                                >
-                                  {displayLabel}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                </tfoot>
-              </table>
-
-              {/* Indicateur du joueur actif en bas de tableau */}
-              <div className="mt-1 text-center">
-                <span 
-                  className="text-theme-text-secondary uppercase tracking-widest font-black animate-pulse"
-                  style={{ fontSize: `${Math.round((calibration?.statsFontSize ?? 16) * 0.65)}px` }}
-                >
-                  🎯 {players[activePlayerIndex]?.name} à vous de jouer &bull; {players[activePlayerIndex]?.dartsLeft} fléchettes restantes
-                </span>
-              </div>
-            </div>
-          ) : (
-            /* ═══ LISTE DES JOUEURS X01 (OPTIMISÉE 16/9 1080p) ═══ */
-            <div className={`flex-grow min-h-0 gap-1.5 p-2 ${
-              players.length === 3 || players.length === 4
-                ? 'grid grid-cols-2 content-stretch'
-                : players.length >= 5
-                  ? 'grid grid-cols-2 gap-1 content-stretch'
-                  : 'flex flex-col justify-stretch'
-            }`}>
-              {players.map((player, idx) => {
-                const isActive = idx === activePlayerIndex;
-                const numPlayers = players.length;
-                const isLastOddPlayer = (numPlayers === 3 && idx === 2) || (numPlayers === 5 && idx === 4);
-                
-                // Calcul de la taille dynamique des cartes et polices en fonction du nombre de joueurs
-                // Optimisé pour 1080p (hauteur réduite pour tenir sans scroll)
-                let cardPadding = 'p-2 md:p-3';
-                let dartBoxSize = 'w-10 h-7 rounded-xl';
-                let statBoxPadding = 'p-1';
-                let rowSpacing = 'mt-2';
-                const cardFlexClass = numPlayers >= 3 ? '' : 'flex-1';
-                
-                if (numPlayers <= 2) {
-                  cardPadding = 'p-4 md:p-5';
-                  dartBoxSize = 'w-16 h-11 rounded-xl';
-                  statBoxPadding = 'p-1.5';
-                  rowSpacing = 'mt-3.5';
-                } else if (numPlayers <= 4) {
-                  cardPadding = 'p-3 md:p-4';
-                  dartBoxSize = 'w-14 h-9.5 rounded-xl';
-                  statBoxPadding = 'p-1';
-                  rowSpacing = 'mt-2.5';
-                } else {
-                  // 5 à 6 joueurs
-                  cardPadding = 'p-1 md:p-1.5';
-                  dartBoxSize = 'w-9 h-6.5 rounded-md';
-                  statBoxPadding = 'p-0.5';
-                  rowSpacing = 'mt-1';
-                }
-
-                // Calcul de coefficients de redimensionnement basés sur statsFontSize
-                const baseSize = calibration?.statsFontSize ?? 16;
-                const nameStyle = { fontSize: `${Math.round(baseSize * (numPlayers >= 5 ? 0.85 : numPlayers <= 2 ? 1.3 : 1.1))}px` };
-                const scoreStyle = { fontSize: `${Math.round(baseSize * (numPlayers >= 5 ? 1.8 : numPlayers <= 2 ? 4.5 : 3.5))}px` };
-                const subLabelStyle = { fontSize: `${Math.round(baseSize * 0.65)}px` };
-                const tourStyle = { fontSize: `${Math.round(baseSize * 0.75)}px` };
-                const sumStyle = { fontSize: `${Math.round(baseSize * 0.85)}px` };
-                const boxStyle = { fontSize: `${Math.round(baseSize * 0.75)}px` };
-                const statsValueStyle = { fontSize: `${Math.round(baseSize * 0.85)}px` };
-
-                // Extraire les lancers du joueur pour les 3 cases du tour
-                const roundThrows = player.currentRoundThrows || [];
-                const dart1 = roundThrows[0] || '';
-                const dart2 = roundThrows[1] || '';
-                const dart3 = roundThrows[2] || '';
-                
-                // Calculer le score du tour
-                let roundSum = 0;
-                if (isActive) {
-                  const dartsCount = 3 - player.dartsLeft;
-                  const history = player.history || [];
-                  const recentThrows = history.slice(history.length - dartsCount);
-                  roundSum = recentThrows.reduce((a, b) => a + b, 0);
-                } else {
-                  // Pour les inactifs, on fait la somme des points de leur lastRound ou currentRoundThrows
-                  roundSum = roundThrows.reduce((sum, label) => {
-                    if (!label || label === '0') return sum;
-                    if (label.startsWith('T')) return sum + parseInt(label.substring(1)) * 3;
-                    if (label.startsWith('D')) {
-                      if (label === 'D25') return sum + 50;
-                      return sum + parseInt(label.substring(1)) * 2;
-                    }
-                    return sum + parseInt(label);
-                  }, 0);
-                }
-
-                // Formatage de la moyenne avec virgule métrique (Règle user_global)
-                const formattedAvg = player.avg.toLocaleString('fr-FR', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2
-                });
-
-                return (
-                  <div 
-                    key={player.name}
-                    className={`relative flex flex-col justify-center rounded-3xl border-2 transition-all duration-300 ${cardPadding} ${cardFlexClass} ${
-                      isActive 
-                        ? 'bg-theme-accent/15 border-theme-accent shadow-[0_0_20px_var(--theme-accent)]/15 scale-[1.01]' 
-                        : player.roundBust
-                          ? 'bg-[#1a0f0f] border-red-500/30 opacity-90'
-                          : 'bg-black/35 border-theme-border/20 opacity-70'
-                    } ${theme === 'arcade' && isActive ? 'neon-glow-border shadow-[0_0_20px_var(--theme-accent)]' : ''} ${isLastOddPlayer ? 'col-span-2' : ''}`}
-                  >
-                    {/* Ligne 1 : Nom du joueur et Score restant géant */}
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex flex-col justify-center min-w-0 flex-1 pr-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span 
-                            className={`font-black px-2.5 py-0.5 rounded-md flex-shrink-0 ${
-                              isActive ? 'bg-theme-accent text-black font-extrabold' : 'bg-black/40 text-theme-text-secondary'
-                            } ${theme === 'arcade' ? 'font-mono' : ''}`}
-                            style={{ fontSize: `${Math.round(baseSize * 0.7)}px` }}
-                          >
-                            J{idx + 1}
-                          </span>
-                          <span 
-                            className={`font-black tracking-wide uppercase truncate flex items-center gap-1.5 ${
-                              isActive ? 'text-theme-accent' : 'text-zinc-300'
-                            } ${theme === 'arcade' ? 'font-mono' : ''}`}
-                            style={nameStyle}
-                          >
-                            <span>{player.name}</span>
-                            <span>{player.emoji || '🎯'}</span>
-                          </span>
-                          {isActive && (
-                            <span className="flex-shrink-0 flex items-center justify-center w-2 h-2 rounded-full bg-[#22c55e] animate-pulse" />
-                          )}
-                          {player.roundBust && (
-                            <span 
-                              className="flex-shrink-0 bg-red-600/95 text-white font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse"
-                              style={{ fontSize: `${Math.round(baseSize * 0.55)}px` }}
-                            >
-                              Bust
-                            </span>
-                          )}
-                        </div>
-                        <span 
-                          className="text-zinc-500 font-semibold mt-0.5 truncate"
-                          style={subLabelStyle}
-                        >
-                          {isActive ? `En cours — ${player.dartsLeft} fléchette(s)` : 'En attente'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <span 
-                          className={`font-black tracking-tighter leading-none ${
-                            player.roundBust 
-                              ? 'text-red-400/90' 
-                              : isActive 
-                                ? 'text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.15)]' 
-                                : 'text-zinc-400'
-                          } ${theme === 'arcade' ? 'neon-glow-text font-mono' : ''}`}
-                          style={scoreStyle}
-                        >
-                          {player.score}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Ligne 2 : Fléchettes jetées au cours de ce tour */}
-                    <div className={`flex items-center justify-between ${rowSpacing} pt-2 border-t border-zinc-900/40`}>
-                      <div className="flex items-center gap-1.5">
-                        <span 
-                          className="text-zinc-500 font-bold uppercase tracking-wider"
-                          style={tourStyle}
-                        >
-                          Tour :
-                        </span>
-                        {player.roundBust ? (
-                          <span 
-                            className="text-red-500 font-black tracking-widest animate-pulse"
-                            style={tourStyle}
-                          >
-                            BUST ❌
-                          </span>
-                        ) : (
-                          (roundSum > 0 || roundThrows.length > 0) ? (
-                            <span 
-                              className="bg-zinc-900 text-[#22c55e] border border-zinc-850/80 font-black px-2.5 py-0.5 rounded-md"
-                              style={sumStyle}
-                            >
-                              {roundSum} pts
-                            </span>
-                          ) : (
-                            <span 
-                              className="text-zinc-650 font-semibold italic"
-                              style={tourStyle}
-                            >
-                              Aucun
-                            </span>
-                          )
-                        )}
-                      </div>
-
-                      <div className="flex gap-1">
-                        {[dart1, dart2, dart3].map((dart, dIdx) => {
-                          const isBustDart = player.roundBust && dart && dIdx === roundThrows.length - 1;
-                          return (
-                            <div 
-                              key={dIdx} 
-                              className={`border flex items-center justify-center font-black transition-all duration-300 ${dartBoxSize} ${
-                                isBustDart
-                                  ? 'border-red-500/60 bg-red-950/20 text-red-400 shadow-[0_0_8px_rgba(239,68,68,0.3)]'
-                                  : dart 
-                                    ? 'border-zinc-700 text-white bg-zinc-900' 
-                                    : 'border-zinc-900 text-transparent bg-black/40'
-                              }`}
-                              style={boxStyle}
-                            >
-                              {dart}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Ligne 3 : Grille des 4 statistiques en 2 lignes (2x2) */}
-                    <div className={`grid grid-cols-2 gap-1.5 ${rowSpacing} pt-2 border-t border-zinc-900/60 text-center`}>
-                      <div className={`flex flex-col items-center justify-center ${statBoxPadding} bg-black/25 rounded-xl border border-zinc-900/40`}>
-                        <span className="text-zinc-500 font-bold uppercase tracking-wider mb-0.5 font-bold" style={{ fontSize: `${Math.round(baseSize * 0.55)}px` }}>Moyenne</span>
-                        <span className="font-extrabold text-white" style={statsValueStyle}>{formattedAvg}</span>
-                      </div>
-
-                      <div className={`flex flex-col items-center justify-center ${statBoxPadding} bg-black/25 rounded-xl border border-zinc-900/40`}>
-                        <span className="text-zinc-500 font-bold uppercase tracking-wider mb-0.5 font-bold" style={{ fontSize: `${Math.round(baseSize * 0.55)}px` }}>Dernier</span>
-                        <span className="font-extrabold text-[#22c55e]" style={statsValueStyle}>
-                          {player.lastRoundScore !== undefined && player.lastRoundScore > 0 ? player.lastRoundScore : '-'}
-                        </span>
-                      </div>
-
-                      <div className={`flex flex-col items-center justify-center ${statBoxPadding} bg-black/25 rounded-xl border border-zinc-900/40`}>
-                        <span className="text-zinc-500 font-bold uppercase tracking-wider mb-0.5 font-bold" style={{ fontSize: `${Math.round(baseSize * 0.55)}px` }}>Meilleur</span>
-                        <span className="font-extrabold text-yellow-500" style={statsValueStyle}>
-                          {player.bestRound !== undefined && player.bestRound > 0 ? player.bestRound : '-'}
-                        </span>
-                      </div>
-
-                      <div className={`flex flex-col items-center justify-center ${statBoxPadding} bg-black/25 rounded-xl border border-zinc-900/40`}>
-                        <span className="text-zinc-500 font-bold uppercase tracking-wider mb-0.5 font-bold" style={{ fontSize: `${Math.round(baseSize * 0.55)}px` }}>Lancers</span>
-                        <span className="font-extrabold text-zinc-300" style={statsValueStyle}>{player.throwsCount}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* --- PIED DE PAGE : Logo & Infos de salon discrets et premium --- */}
-        <div className="mt-2 pt-2 border-t border-theme-border/20 flex flex-row justify-between items-center text-[10px] text-theme-text-secondary/80 select-none">
-          <div className="flex items-center gap-2">
-            <span className="font-extrabold tracking-widest text-theme-accent">MINOU DARTS</span>
-            <span className="text-zinc-700">|</span>
-            <span className="uppercase tracking-wider text-[9px]">Est. 2026</span>
-          </div>
-          <div className="text-center font-mono">
-            SALON : <span className="font-black text-theme-accent">{room?.roomId}</span>
-          </div>
-          <div className="text-right hidden sm:block">
-            {room?.gameType === 'cricket' ? 'CRICKET' : `CIBLE : ${room?.targetScore}`} &bull; METRIC PWA
-          </div>
-        </div>
-
-        {/* Bouton de sélection de mode de vue et popup (en bas à droite) */}
-        <div className="absolute bottom-4 right-4 z-50 flex flex-col items-end gap-2">
-          {showModeSelector && (
-            <div className="bg-zinc-950/95 border border-theme-border/50 rounded-2xl p-2.5 shadow-2xl backdrop-blur-md w-56 flex flex-col gap-1 text-xs text-white">
-              <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest px-2 py-1">
-                Mode d'affichage
-              </span>
-              <button 
-                onClick={() => { setProjectorMode('classic'); setShowModeSelector(false); }}
-                className={`w-full flex items-center justify-between p-2 rounded-xl text-left font-bold transition-all ${
-                  projectorMode === 'classic' 
-                    ? 'bg-theme-accent text-black font-extrabold shadow-md' 
-                    : 'hover:bg-zinc-900 text-zinc-350 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Tv className="w-4 h-4" />
-                  <span>Vue Classique</span>
-                </div>
-                {projectorMode === 'classic' && <span className="text-[9px] uppercase tracking-wider font-black">Actif</span>}
-              </button>
-
-              <button 
-                onClick={() => { setProjectorMode('fullscreen'); setShowModeSelector(false); }}
-                className={`w-full flex items-center justify-between p-2 rounded-xl text-left font-bold transition-all ${
-                  projectorMode === 'fullscreen' 
-                    ? 'bg-theme-accent text-black font-extrabold shadow-md' 
-                    : 'hover:bg-zinc-900 text-zinc-350 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Maximize2 className="w-4 h-4" />
-                  <span>Plein Écran</span>
-                </div>
-                {projectorMode === 'fullscreen' && <span className="text-[9px] uppercase tracking-wider font-black">Actif</span>}
-              </button>
-
-              <button 
-                onClick={() => { setProjectorMode('ar'); setShowModeSelector(false); }}
-                className={`w-full flex items-center justify-between p-2 rounded-xl text-left font-bold transition-all ${
-                  projectorMode === 'ar' 
-                    ? 'bg-theme-accent text-black font-extrabold shadow-md' 
-                    : 'hover:bg-zinc-900 text-zinc-350 hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" />
-                  <span>Réalité Augmentée</span>
-                </div>
-                {projectorMode === 'ar' && <span className="text-[9px] uppercase tracking-wider font-black">Actif</span>}
-              </button>
-            </div>
-          )}
-
-          <button
-            onClick={() => setShowModeSelector(!showModeSelector)}
-            className="p-3.5 bg-zinc-900/90 border border-theme-border/50 text-theme-accent rounded-full hover:scale-105 transition-all shadow-xl hover:bg-zinc-950 flex items-center justify-center"
-            title="Changer de vue"
-          >
-            <Eye className="w-5 h-5" />
-          </button>
-        </div>
-
-          </>
-        )}
-      </div>
-    </div>
+    <X01ProjectorGame
+      room={room}
+      projectorMode={projectorMode}
+      setProjectorMode={setProjectorMode}
+      targetPosition={targetPosition}
+      setTargetPosition={handleToggleTargetPosition}
+      showModeSelector={showModeSelector}
+      setShowModeSelector={setShowModeSelector}
+      renderCalibratedDartboard={renderCalibratedDartboard}
+      calibration={calibration}
+      isCalibrating={isCalibrating}
+      setIsCalibrating={handleSetIsCalibrating}
+      calibrationStep={calibrationStep}
+      renderProjectorCalibrationInterface={renderProjectorCalibrationInterface}
+      lastCalibrationHit={lastCalibrationHit}
+      renderStatsCalibrationOverlay={renderStatsCalibrationOverlay}
+    />
   );
 };
 

@@ -23,8 +23,14 @@ service cloud.firestore {
       // Un utilisateur peut créer un joueur et l'associer à son ID
       allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
       
-      // Un utilisateur ne peut modifier/supprimer que SES propres joueurs
-      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      // Autoriser le propriétaire à modifier le profil, et les télécommandes du salon à mettre à jour uniquement les statistiques
+      allow update: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stats'])
+      );
+      
+      // La suppression est strictement réservée au créateur du profil
+      allow delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
     }
   }
 }

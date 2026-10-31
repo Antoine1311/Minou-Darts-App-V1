@@ -1,194 +1,288 @@
-import type { RoomData } from './roomService';
+import type { RoomData, Player, LastCompletedRound } from './roomService';
 
-export const calculateNextX01State = (room: RoomData, points: number, isDouble: boolean = false, throwLabel?: string): RoomData => {
-  const updatedRoom = { 
-    ...room,
-    players: room.players.map(p => ({ 
-      ...p, 
-      history: [...(p.history || [])],
-      currentRoundThrows: p.currentRoundThrows ? [...p.currentRoundThrows] : []
-    }))
-  };
-  const playerIndex = updatedRoom.activePlayerIndex;
-  const player = updatedRoom.players[playerIndex];
+export interface X01ThrowRecord {
+  points: number;
+  isDouble: boolean;
+  label: string;
+}
 
-  // Initialiser scoreBeforeRound si non défini
-  if (player.scoreBeforeRound === undefined) {
-    player.scoreBeforeRound = player.score;
+/**
+ * Rejoue l'intégralité d'une partie X01 de façon déterministe à partir de l'historique des lancers.
+ * Cette approche élimine tout risque de désynchronisation de score lors des annulations en chaîne ou après des Busts.
+ */
+export function replayX01Game(
+  targetScore: number,
+  doubleOut: boolean,
+  players: Player[]
+): {
+  players: Player[];
+  activePlayerIndex: number;
+  status: 'setup' | 'playing' | 'finished';
+  winnerName: string;
+  lastCompletedRound: LastCompletedRound | null;
+} {
+  const numPlayers = players.length;
+  if (numPlayers === 0) {
+    return { players: [], activePlayerIndex: 0, status: 'playing', winnerName: '', lastCompletedRound: null };
   }
 
-  // Si on commence un nouveau tour, s'assurer que currentRoundThrows est vide et roundBust est faux
-  if (player.dartsLeft === 3) {
+  // 1. Initialiser tous les joueurs à leur état initial
+  const simulatedPlayers: Player[] = players.map(p => ({
+    ...p,
+    score: targetScore,
+    scoreBeforeRound: targetScore,
+    dartsLeft: 3,
+    throwsCount: 0,
+    totalPoints: 0,
+    avg: 0,
+    history: [],
+    x01ThrowsHistory: [],
+    currentRoundThrows: [],
+    roundScores: [],
+    lastRoundScore: 0,
+    bestRound: 0,
+    roundBust: false,
+    bustsCount: 0
+  }));
+
+  // File d'attente des lancers par joueur (si x01ThrowsHistory est un tableau même vide, il fait foi)
+  const playerQueues: X01ThrowRecord[][] = players.map(p => {
+    if (Array.isArray(p.x01ThrowsHistory)) {
+      return [...p.x01ThrowsHistory];
+    }
+    // Rétrocompatibilité uniquement si x01ThrowsHistory n'était pas initialisé
+    return (p.history || []).map(pts => ({
+      points: pts,
+      isDouble: pts === 50 || (doubleOut && pts % 2 === 0 && pts <= 40),
+      label: pts === 50 ? 'D25' : pts === 25 ? '25' : pts === 0 ? '0' : String(pts)
+    }));
+  });
+
+  let currentActiveIndex = 0;
+  let gameStatus: 'setup' | 'playing' | 'finished' = 'playing';
+  let winnerName = '';
+  let lastCompletedRound: LastCompletedRound | null = null;
+
+  const totalRemainingThrows = () => playerQueues.reduce((sum, q) => sum + q.length, 0);
+
+  while (totalRemainingThrows() > 0 && gameStatus !== 'finished') {
+    const queue = playerQueues[currentActiveIndex];
+    const player = simulatedPlayers[currentActiveIndex];
+
+    if (queue.length === 0) {
+      const hasOtherThrows = playerQueues.some((q, idx) => idx !== currentActiveIndex && q.length > 0);
+      if (!hasOtherThrows) break;
+      currentActiveIndex = (currentActiveIndex + 1) % numPlayers;
+      continue;
+    }
+
+    // Début d'un nouveau tour pour ce joueur
+    player.scoreBeforeRound = player.score;
     player.currentRoundThrows = [];
     player.roundBust = false;
-  }
+    player.dartsLeft = 3;
 
-  // 1. Enregistrer le lancer
-  player.history = [...player.history, points];
-  player.dartsLeft -= 1;
-  player.throwsCount = (player.throwsCount || 0) + 1;
-  player.totalPoints = (player.totalPoints || 0) + points;
+    let roundEnded = false;
+    let roundPointsAccumulated = 0;
 
-  // Ajouter le libellé du lancer
-  if (throwLabel) {
-    player.currentRoundThrows = [...(player.currentRoundThrows || []), throwLabel];
-  } else {
-    player.currentRoundThrows = [...(player.currentRoundThrows || []), String(points)];
-  }
+    while (player.dartsLeft > 0 && queue.length > 0 && !roundEnded) {
+      const nextThrow = queue.shift()!;
+      const points = nextThrow.points;
+      const isDouble = nextThrow.isDouble;
+      const label = nextThrow.label;
 
-  // Calcul du nouveau score théorique
-  const newScore = player.score - points;
-  let isBust = false;
+      player.history.push(points);
+      player.x01ThrowsHistory!.push(nextThrow);
+      player.dartsLeft -= 1;
+      player.throwsCount += 1;
+      roundPointsAccumulated += points;
+      player.totalPoints += points;
+      player.currentRoundThrows!.push(label);
 
-  // Règle du "Bust" (Dépassement) et Double Out
-  if (newScore < 0) {
-    isBust = true;
-  } else if (updatedRoom.doubleOut) {
-    if (newScore === 1) {
-      isBust = true;
-    } else if (newScore === 0 && !isDouble) {
-      isBust = true;
+      const newScore = player.score - points;
+      let isBust = false;
+
+      // Règles officielles de Bust & Double Out
+      if (newScore < 0) {
+        isBust = true;
+      } else if (doubleOut) {
+        if (newScore === 1) {
+          isBust = true;
+        } else if (newScore === 0 && !isDouble) {
+          isBust = true;
+        }
+      }
+
+      if (isBust) {
+        // Règle officielle PDC/WDF : une volée bustée vaut 0 point marqué dans le total et la moyenne
+        player.totalPoints = Math.max(0, player.totalPoints - roundPointsAccumulated);
+        roundPointsAccumulated = 0;
+        player.score = player.scoreBeforeRound;
+        player.dartsLeft = 0;
+        player.roundBust = true;
+        player.bustsCount = (player.bustsCount || 0) + 1;
+        roundEnded = true;
+      } else {
+        player.score = newScore;
+        player.roundBust = false;
+      }
+
+      // Moyenne métrique sur 3 fléchettes
+      if (player.throwsCount > 0) {
+        player.avg = parseFloat(((player.totalPoints / player.throwsCount) * 3).toFixed(1));
+      }
+
+      // Victoire
+      if (player.score === 0) {
+        gameStatus = 'finished';
+        winnerName = player.name;
+        roundEnded = true;
+      }
+    }
+
+    // Clôture du tour si 3 fléchettes consommées, Bust ou Victoire
+    if (player.dartsLeft === 0 || roundEnded) {
+      const roundScore = player.roundBust ? 0 : (player.scoreBeforeRound - player.score);
+      player.roundScores = [...(player.roundScores || []), roundScore];
+      player.lastRoundScore = roundScore;
+      player.bestRound = Math.max(0, ...(player.roundScores || []));
+
+      lastCompletedRound = {
+        roundId: `x01-${currentActiveIndex}-${player.throwsCount}`,
+        playerIndex: currentActiveIndex,
+        playerName: player.name,
+        throws: [...(player.currentRoundThrows || [])],
+        score: roundScore,
+        isBust: !!player.roundBust
+      };
+
+      if (gameStatus !== 'finished') {
+        player.dartsLeft = 3;
+        currentActiveIndex = (currentActiveIndex + 1) % numPlayers;
+      }
     }
   }
 
-  if (isBust) {
-    // Bust! On remet le score du début de tour
-    player.score = player.scoreBeforeRound;
-    player.dartsLeft = 0; 
-    player.roundBust = true;
-    player.bustsCount = (player.bustsCount || 0) + 1;
-  } else {
-    player.score = newScore;
-    player.roundBust = false;
-  }
+  return {
+    players: simulatedPlayers,
+    activePlayerIndex: currentActiveIndex,
+    status: gameStatus,
+    winnerName,
+    lastCompletedRound
+  };
+}
 
-  // Calcul de la moyenne métrique
-  if (player.throwsCount > 0) {
-    player.avg = parseFloat(((player.totalPoints / player.throwsCount) * 3).toFixed(1));
-  }
+export const calculateNextX01State = (
+  room: RoomData,
+  points: number,
+  isDouble: boolean = false,
+  throwLabel?: string
+): RoomData => {
+  const targetIndex = room.activePlayerIndex;
+  const label = throwLabel || (points === 50 ? 'D25' : points === 25 ? '25' : points === 0 ? '0' : String(points));
 
-  updatedRoom.players[playerIndex] = player;
+  const updatedPlayers = room.players.map((p, idx) => {
+    if (idx !== targetIndex) return { ...p };
+    const prevX01History = Array.isArray(p.x01ThrowsHistory)
+      ? [...p.x01ThrowsHistory]
+      : (p.history || []).map(pts => ({
+          points: pts,
+          isDouble: pts === 50 || (!!room.doubleOut && pts % 2 === 0 && pts <= 40),
+          label: pts === 50 ? 'D25' : pts === 25 ? '25' : pts === 0 ? '0' : String(pts)
+        }));
 
-  // Vérifier si le tour est terminé (3 fléchettes, Bust, ou victoire)
-  const isRoundEnded = player.dartsLeft === 0 || player.score === 0;
-  if (isRoundEnded) {
-    const roundScore = player.roundBust ? 0 : ((player.scoreBeforeRound ?? player.score) - player.score);
-    player.roundScores = [...(player.roundScores || []), roundScore];
-    player.lastRoundScore = roundScore;
-    player.bestRound = Math.max(0, ...(player.roundScores || []));
-  }
+    const nextHist = [...prevX01History, { points, isDouble, label }];
+    return {
+      ...p,
+      x01ThrowsHistory: nextHist,
+      history: nextHist.map(t => t.points)
+    };
+  });
 
-  // Vérifier si le joueur a gagné
-  if (player.score === 0) {
-    updatedRoom.status = 'finished';
-    updatedRoom.winnerName = player.name;
-  } else if (player.dartsLeft === 0) {
-    // Passer au joueur suivant
-    player.dartsLeft = 3;
-    updatedRoom.players[playerIndex] = player;
+  const replayed = replayX01Game(
+    room.targetScore || 501,
+    !!room.doubleOut,
+    updatedPlayers
+  );
 
-    const nextPlayerIndex = (playerIndex + 1) % updatedRoom.players.length;
-    updatedRoom.activePlayerIndex = nextPlayerIndex;
-    
-    updatedRoom.players[nextPlayerIndex].scoreBeforeRound = updatedRoom.players[nextPlayerIndex].score;
-    updatedRoom.players[nextPlayerIndex].currentRoundThrows = [];
-    updatedRoom.players[nextPlayerIndex].roundBust = false;
-  }
-
-  return updatedRoom;
+  return {
+    ...room,
+    players: replayed.players,
+    activePlayerIndex: replayed.activePlayerIndex,
+    status: replayed.status,
+    winnerName: replayed.winnerName,
+    lastCompletedRound: replayed.lastCompletedRound
+  };
 };
 
 export const undoX01Throw = (room: RoomData): Partial<RoomData> | null => {
-  const updatedPlayers = room.players.map(p => ({
-    ...p,
-    history: [...(p.history || [])],
-    currentRoundThrows: p.currentRoundThrows ? [...p.currentRoundThrows] : [],
-    roundScores: p.roundScores ? [...p.roundScores] : []
-  }));
-  
-  let targetPlayerIndex = room.activePlayerIndex;
-  let player = updatedPlayers[targetPlayerIndex];
-  let crossedRoundBoundary = false;
-  const wasFinished = room.status === 'finished';
+  const players = room.players || [];
+  if (players.length === 0) return null;
 
-  // Si le tour n'est pas entamé ou si le jeu est fini, on annule le coup du joueur précédent
-  if ((player.dartsLeft === 3 && !wasFinished) || wasFinished) {
-    const prevPlayerIndex = (room.activePlayerIndex - 1 + room.players.length) % room.players.length;
-    const prevPlayer = updatedPlayers[prevPlayerIndex];
-    
-    // Si c'est le début de partie et personne n'a joué
-    if (!prevPlayer.history || prevPlayer.history.length === 0) {
-      if (player.history && player.history.length > 0) {
-        // En cas de partie terminée où le winner a juste fini son tour
-        targetPlayerIndex = room.activePlayerIndex;
-      } else {
-        return null; // Rien à annuler
+  const totalThrows = players.reduce((sum, p) => {
+    const count = Array.isArray(p.x01ThrowsHistory)
+      ? p.x01ThrowsHistory.length
+      : (p.history ? p.history.length : 0);
+    return sum + count;
+  }, 0);
+
+  if (totalThrows === 0) return null; // Rien à annuler
+
+  // Identifier le joueur ayant lancé la dernière fléchette
+  let lastThrowerIndex = -1;
+  const activePlayer = players[room.activePlayerIndex];
+
+  if (room.status === 'finished') {
+    lastThrowerIndex = players.findIndex(p => p.name === room.winnerName);
+    if (lastThrowerIndex === -1) lastThrowerIndex = room.activePlayerIndex;
+  } else if (activePlayer && activePlayer.dartsLeft < 3) {
+    lastThrowerIndex = room.activePlayerIndex;
+  } else {
+    for (let offset = 1; offset <= players.length; offset++) {
+      const candidateIdx = (room.activePlayerIndex - offset + players.length) % players.length;
+      const candidate = players[candidateIdx];
+      const count = Array.isArray(candidate.x01ThrowsHistory)
+        ? candidate.x01ThrowsHistory.length
+        : (candidate.history ? candidate.history.length : 0);
+      if (count > 0) {
+        lastThrowerIndex = candidateIdx;
+        break;
       }
-    } else {
-      targetPlayerIndex = prevPlayerIndex;
-      player = prevPlayer;
-      crossedRoundBoundary = true;
     }
   }
 
-  // Si on est vraiment tout au début de la partie
-  if (!player.history || player.history.length === 0) return null;
+  if (lastThrowerIndex === -1) return null;
 
-  const lastThrow = player.history.pop();
-  if (lastThrow !== undefined) {
-    player.throwsCount = Math.max(0, player.throwsCount - 1);
-    player.totalPoints = Math.max(0, player.totalPoints - lastThrow);
-    
-    if (player.currentRoundThrows && player.currentRoundThrows.length > 0) {
-      player.currentRoundThrows.pop();
-    }
-    
-    // Si la fléchette annulée était un Bust
-    if (player.roundBust) {
-      player.roundBust = false;
-      player.bustsCount = Math.max(0, (player.bustsCount || 1) - 1);
-      // Re-calculer le score courant en fonction du score au début du tour
-      player.score = player.scoreBeforeRound !== undefined ? player.scoreBeforeRound : player.score;
-      // Soustraire tous les lancers de l'historique de ce tour
-      const currentTourThrows = player.history.length % 3;
-      const recentThrowsCount = currentTourThrows === 0 && player.history.length > 0 ? 3 : currentTourThrows;
-      for(let i=0; i<recentThrowsCount; i++){
-        player.score -= player.history[player.history.length - 1 - i];
-      }
-    } else {
-      player.score += lastThrow;
-    }
+  // Retirer le dernier lancer du joueur identifié en synchronisant aussi history
+  const updatedPlayers = players.map((p, idx) => {
+    if (idx !== lastThrowerIndex) return { ...p };
+    const x01Hist = Array.isArray(p.x01ThrowsHistory)
+      ? [...p.x01ThrowsHistory]
+      : (p.history || []).map(pts => ({
+          points: pts,
+          isDouble: pts === 50 || (!!room.doubleOut && pts % 2 === 0 && pts <= 40),
+          label: pts === 50 ? 'D25' : pts === 25 ? '25' : pts === 0 ? '0' : String(pts)
+        }));
 
-    if (crossedRoundBoundary || wasFinished) {
-      if (player.roundScores && player.roundScores.length > 0) {
-        player.roundScores.pop();
-        player.lastRoundScore = player.roundScores.length > 0 ? player.roundScores[player.roundScores.length - 1] : 0;
-        player.bestRound = player.roundScores.length > 0 ? Math.max(...player.roundScores) : 0;
-      }
-    }
-
-    // Le joueur récupère une fléchette (ou passe de 0 à 1)
-    if (crossedRoundBoundary || wasFinished) {
-       player.dartsLeft = 1;
-    } else {
-       player.dartsLeft += 1;
-    }
-
-    // Moyenne
-    if (player.throwsCount > 0) {
-      player.avg = parseFloat(((player.totalPoints / player.throwsCount) * 3).toFixed(1));
-    } else {
-      player.avg = 0;
-    }
-
-    updatedPlayers[targetPlayerIndex] = player;
-
+    x01Hist.pop();
     return {
-      players: updatedPlayers,
-      activePlayerIndex: targetPlayerIndex,
-      status: 'playing',
-      winnerName: ''
+      ...p,
+      x01ThrowsHistory: x01Hist,
+      history: x01Hist.map(t => t.points)
     };
-  }
-  return null;
+  });
+
+  const replayed = replayX01Game(
+    room.targetScore || 501,
+    !!room.doubleOut,
+    updatedPlayers
+  );
+
+  return {
+    players: replayed.players,
+    activePlayerIndex: replayed.activePlayerIndex,
+    status: replayed.status,
+    winnerName: replayed.winnerName,
+    lastCompletedRound: replayed.lastCompletedRound
+  };
 };

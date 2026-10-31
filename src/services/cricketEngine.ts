@@ -138,9 +138,10 @@ export function processCricketThrow(
   const targets = room.cricketTargets || [];
   const isCutThroat = room.cricketScoringMode === 'cutthroat';
   
-  // Si on commence un nouveau tour, réinitialiser les lancers
+  // Si on commence un nouveau tour, réinitialiser les lancers et le compteur de marques du tour
   if (player.dartsLeft === 3) {
     player.currentRoundThrows = [];
+    player.cricketCurrentRoundMarks = 0;
   }
   
   // Résultat par défaut (lancer non valide ou manqué)
@@ -152,73 +153,91 @@ export function processCricketThrow(
     wasValid: false
   };
 
+  let validMarksThisThrow = 0;
+  let wasUsefulHit = false;
+
+  // Initialiser de manière rétrocompatible le cumul exact de marques valides de la manche
+  const previousTotalMarks = player.cricketTotalMarks !== undefined
+    ? player.cricketTotalMarks
+    : Object.values(player.cricketMarks || {}).reduce((sum, m) => sum + Math.min(m, MARKS_TO_CLOSE), 0);
+
   // 1. Vérifier si le numéro fait partie des cibles
   if (baseNumber !== 0 && isValidCricketTarget(baseNumber, targets)) {
-    throwResult.wasValid = true;
     const targetKey = String(baseNumber);
     const currentMarks = player.cricketMarks?.[targetKey] || 0;
-    
-    // Déterminer les marques brutes
-    // Pour le Bull : Simple = 1 marque, Double = 2 marques (Inner Bull)
-    let rawMarks = multiplier;
-    if (baseNumber === BULL) {
-      // Triple Bull n'existe pas en fléchettes réelles
-      rawMarks = Math.min(multiplier, 2);
-    }
-    
-    // 2. Appliquer les marques jusqu'à MARKS_TO_CLOSE
-    const marksNeeded = Math.max(0, MARKS_TO_CLOSE - currentMarks);
-    const marksApplied = Math.min(rawMarks, marksNeeded);
-    const excessMarks = rawMarks - marksApplied;
-    
-    // Mettre à jour les marques du joueur
-    player.cricketMarks![targetKey] = currentMarks + marksApplied;
-    
-    throwResult.marksApplied = marksApplied;
-    
-    // 3. Les marques excédentaires deviennent des points
-    // SEULEMENT si le joueur a fermé ET qu'au moins un adversaire n'a pas fermé
-    if (excessMarks > 0 || currentMarks >= MARKS_TO_CLOSE) {
-      const scorableMarks = currentMarks >= MARKS_TO_CLOSE ? rawMarks : excessMarks;
-      
-      // Vérifier si au moins un adversaire n'a pas fermé cette cible
-      const someOpponentOpen = updatedPlayers.some((p, idx) => {
-        if (idx === playerIndex) return false;
-        return (p.cricketMarks?.[targetKey] || 0) < MARKS_TO_CLOSE;
-      });
-      
-      if (someOpponentOpen && scorableMarks > 0) {
-        const pointsValue = baseNumber === BULL ? 25 : baseNumber;
-        const points = scorableMarks * pointsValue;
-        
-        if (isCutThroat) {
-          // Cut Throat : On donne les points aux adversaires qui n'ont pas encore fermé
-          updatedPlayers.forEach((p, idx) => {
-            if (idx !== playerIndex && (p.cricketMarks?.[targetKey] || 0) < MARKS_TO_CLOSE) {
-              p.score = (p.score || 0) + points;
-              p.totalPoints = (p.totalPoints || 0) + points;
-            }
-          });
-        } else {
-          // Standard : On s'attribue les points
-          player.score = (player.score || 0) + points;
-          player.totalPoints = (player.totalPoints || 0) + points;
-        }
-        throwResult.pointsScored = points;
+
+    // Vérifier si au moins un adversaire n'a pas encore fermé cette cible
+    const someOpponentOpen = updatedPlayers.some((p, idx) => {
+      if (idx === playerIndex) return false;
+      return (p.cricketMarks?.[targetKey] || 0) < MARKS_TO_CLOSE;
+    });
+
+    // Une cible déjà fermée par le joueur ET par tous les adversaires est une "cible morte"
+    const isDeadTarget = currentMarks >= MARKS_TO_CLOSE && !someOpponentOpen;
+
+    if (!isDeadTarget) {
+      throwResult.wasValid = true;
+      wasUsefulHit = true;
+
+      // Pour le Bull : Simple = 1 marque, Double = 2 marques (Inner Bull)
+      let rawMarks = multiplier;
+      if (baseNumber === BULL) {
+        // Triple Bull n'existe pas en fléchettes réelles
+        rawMarks = Math.min(multiplier, 2);
       }
+
+      // 2. Appliquer les marques jusqu'à MARKS_TO_CLOSE
+      const marksNeeded = Math.max(0, MARKS_TO_CLOSE - currentMarks);
+      const marksApplied = Math.min(rawMarks, marksNeeded);
+      const excessMarks = rawMarks - marksApplied;
+
+      // Mettre à jour les marques de fermeture du joueur (0 à 3)
+      player.cricketMarks![targetKey] = currentMarks + marksApplied;
+      throwResult.marksApplied = marksApplied;
+
+      let validScorableMarks = 0;
+
+      // 3. Les marques excédentaires deviennent des points SI au moins un adversaire n'a pas fermé
+      if (someOpponentOpen && (excessMarks > 0 || currentMarks >= MARKS_TO_CLOSE)) {
+        validScorableMarks = currentMarks >= MARKS_TO_CLOSE ? rawMarks : excessMarks;
+
+        if (validScorableMarks > 0) {
+          const pointsValue = baseNumber === BULL ? 25 : baseNumber;
+          const points = validScorableMarks * pointsValue;
+
+          if (isCutThroat) {
+            // Gorge Tranchée (Cut-Throat) : on inflige les points aux adversaires qui n'ont pas encore fermé
+            updatedPlayers.forEach((p, idx) => {
+              if (idx !== playerIndex && (p.cricketMarks?.[targetKey] || 0) < MARKS_TO_CLOSE) {
+                p.score = (p.score || 0) + points;
+                p.totalPoints = (p.totalPoints || 0) + points;
+              }
+            });
+          } else {
+            // Standard : on s'attribue les points
+            player.score = (player.score || 0) + points;
+            player.totalPoints = (player.totalPoints || 0) + points;
+          }
+          throwResult.pointsScored = points;
+        }
+      }
+
+      validMarksThisThrow = marksApplied + validScorableMarks;
     }
   }
-  
+
   // 4. Mise à jour des compteurs du joueur et calcul des statistiques de tirs réussis/loupés
   player.dartsLeft -= 1;
   player.throwsCount += 1;
+  player.cricketTotalMarks = previousTotalMarks + validMarksThisThrow;
+  player.cricketCurrentRoundMarks = (player.cricketCurrentRoundMarks || 0) + validMarksThisThrow;
   player.history = [...player.history, baseNumber === 0 ? 0 : baseNumber + multiplier * 100];
-  
-  const isMissed = baseNumber === 0 || !isValidCricketTarget(baseNumber, targets);
+
+  const isMissed = !wasUsefulHit;
   if (isMissed) {
     player.missedDarts = (player.missedDarts || 0) + 1;
   }
-  
+
   player.accuracy = parseFloat((((player.throwsCount - (player.missedDarts || 0)) / player.throwsCount) * 100).toFixed(1));
 
   // Enregistrer le libellé du lancer
@@ -230,14 +249,10 @@ export function processCricketThrow(
     label = `${prefix}${baseNumber}`;
   }
   player.currentRoundThrows = [...(player.currentRoundThrows || []), label];
-  
-  // Calcul du MPR (Marks Per Round) — stocké dans le champ `avg` pour compatibilité
-  const totalMarksCount = Object.values(player.cricketMarks || {}).reduce(
-    (sum, m) => sum + Math.min(m, MARKS_TO_CLOSE), 0
-  );
-  const roundsPlayed = Math.ceil(player.throwsCount / 3);
-  player.avg = roundsPlayed > 0 
-    ? parseFloat((totalMarksCount / roundsPlayed).toFixed(2)) 
+
+  // Calcul officiel du MPR (Marks Per Round) = (Total des marques valides / Fléchettes lancées) * 3
+  player.avg = player.throwsCount > 0
+    ? parseFloat(((player.cricketTotalMarks / player.throwsCount) * 3).toFixed(2))
     : 0;
   
   // 5. Vérifier la victoire (nécessaire pour savoir si le tour est terminé)
@@ -264,56 +279,31 @@ export function processCricketThrow(
     }
   }
 
-  // Si le tour se termine (ou la partie est finie), calculer les stats de tour (bestCricketRound, whiteRounds)
-  // On identifie les lancers de ce tour à partir de player.history (les 1, 2 ou 3 derniers lancers de ce tour)
+  // Si le tour se termine (ou la partie est finie), enregistrer les stats de tour (bestCricketRound, whiteRounds)
   const isRoundEnded = player.dartsLeft === 0 || status === 'finished';
   if (isRoundEnded) {
-    const throwsThisRoundCount = player.currentRoundThrows.length;
-    const roundHistory = player.history.slice(player.history.length - throwsThisRoundCount);
-    
-    // Calculer le nombre de marques appliquées (ou brutes si cible fermée) durant cette volée
-    let marksThisRound = 0;
-    roundHistory.forEach(rawPoints => {
-      if (rawPoints > 0) {
-        let baseNum = 0;
-        let mult = 1;
-        if (rawPoints > 100) {
-          baseNum = rawPoints % 100;
-          mult = Math.floor(rawPoints / 100);
-        } else if (rawPoints === 25) {
-          baseNum = 25; mult = 1;
-        } else if (rawPoints === 50) {
-          baseNum = 25; mult = 2;
-        }
-        
-        if (baseNum > 0 && isValidCricketTarget(baseNum, targets)) {
-          let rawMarks = mult;
-          if (baseNum === BULL) rawMarks = Math.min(rawMarks, 2);
-          marksThisRound += rawMarks;
-        }
-      }
-    });
+    const marksThisRound = player.cricketCurrentRoundMarks || 0;
 
     if (marksThisRound === 0) {
       player.whiteRounds = (player.whiteRounds || 0) + 1;
     }
-    
+
     player.bestCricketRound = Math.max(player.bestCricketRound || 0, marksThisRound);
   }
 
   updatedPlayers[playerIndex] = player;
-  
 
-  
   // 6. Gestion de fin de tour (3 fléchettes lancées)
   let activePlayerIndex = room.activePlayerIndex;
   if (player.dartsLeft === 0 && status !== 'finished') {
     player.dartsLeft = 3;
+    player.cricketCurrentRoundMarks = 0;
     updatedPlayers[playerIndex] = player;
     activePlayerIndex = (playerIndex + 1) % updatedPlayers.length;
-    
+
     // Réinitialiser les lancers du tour courant du joueur suivant
     updatedPlayers[activePlayerIndex].currentRoundThrows = [];
+    updatedPlayers[activePlayerIndex].cricketCurrentRoundMarks = 0;
   }
   
   return {
@@ -381,6 +371,8 @@ export function undoCricketThrow(room: RoomData): Partial<RoomData> | null {
   // Réinitialiser les joueurs
   for (const p of updatedPlayers) {
     p.cricketMarks = createEmptyMarks(targets);
+    p.cricketTotalMarks = 0;
+    p.cricketCurrentRoundMarks = 0;
     p.score = 0;
     p.totalPoints = 0;
     p.throwsCount = 0;
@@ -413,9 +405,10 @@ export function undoCricketThrow(room: RoomData): Partial<RoomData> | null {
     const lancersRestants = playerHist.length - historyIndex;
     const lancersDuTour = Math.min(3, lancersRestants);
     
-    // Réinitialiser les lancers pour ce tour
+    // Réinitialiser les lancers et marques pour ce tour
     const p = updatedPlayers[activeIdx];
     p.currentRoundThrows = [];
+    p.cricketCurrentRoundMarks = 0;
     
     for (let i = 0; i < lancersDuTour; i++) {
       const rawPoints = playerHist[historyIndex + i];
@@ -426,6 +419,8 @@ export function undoCricketThrow(room: RoomData): Partial<RoomData> | null {
       let label = '0';
       let baseNumber = 0;
       let mult = 1;
+      let wasUsefulHit = false;
+      let validMarksThisThrow = 0;
       
       if (rawPoints > 0) {
         if (rawPoints > 100) {
@@ -456,103 +451,91 @@ export function undoCricketThrow(room: RoomData): Partial<RoomData> | null {
         if (baseNumber > 0) {
           const prefix = mult === 3 ? 'T' : mult === 2 ? 'D' : '';
           label = `${prefix}${baseNumber}`;
-          
-          const targetKey = String(baseNumber);
-          const currentMarks = p.cricketMarks![targetKey] || 0;
-          
-          let rawMarks = mult;
-          if (baseNumber === BULL) rawMarks = Math.min(rawMarks, 2);
-          
-          const marksNeeded = Math.max(0, MARKS_TO_CLOSE - currentMarks);
-          const marksApplied = Math.min(rawMarks, marksNeeded);
-          const excessMarks = rawMarks - marksApplied;
-          
-          p.cricketMarks![targetKey] = currentMarks + marksApplied;
-          
-          if (excessMarks > 0 || currentMarks >= MARKS_TO_CLOSE) {
-            const scorableMarks = currentMarks >= MARKS_TO_CLOSE ? rawMarks : excessMarks;
-            
+
+          if (isValidCricketTarget(baseNumber, targets)) {
+            const targetKey = String(baseNumber);
+            const currentMarks = p.cricketMarks![targetKey] || 0;
+
             const someOpponentOpen = updatedPlayers.some((op, opIdx) => {
               if (opIdx === activeIdx) return false;
               return (op.cricketMarks?.[targetKey] || 0) < MARKS_TO_CLOSE;
             });
-            
-            if (someOpponentOpen && scorableMarks > 0) {
-              const pointsValue = baseNumber === BULL ? 25 : baseNumber;
-              const points = scorableMarks * pointsValue;
-              
-              if (room.cricketScoringMode === 'cutthroat') {
-                updatedPlayers.forEach((op, opIdx) => {
-                  if (opIdx !== activeIdx && (op.cricketMarks?.[targetKey] || 0) < MARKS_TO_CLOSE) {
-                    op.score = (op.score || 0) + points;
-                    op.totalPoints = (op.totalPoints || 0) + points;
+
+            const isDeadTarget = currentMarks >= MARKS_TO_CLOSE && !someOpponentOpen;
+
+            if (!isDeadTarget) {
+              wasUsefulHit = true;
+              let rawMarks = mult;
+              if (baseNumber === BULL) rawMarks = Math.min(rawMarks, 2);
+
+              const marksNeeded = Math.max(0, MARKS_TO_CLOSE - currentMarks);
+              const marksApplied = Math.min(rawMarks, marksNeeded);
+              const excessMarks = rawMarks - marksApplied;
+
+              p.cricketMarks![targetKey] = currentMarks + marksApplied;
+
+              let validScorableMarks = 0;
+              if (someOpponentOpen && (excessMarks > 0 || currentMarks >= MARKS_TO_CLOSE)) {
+                validScorableMarks = currentMarks >= MARKS_TO_CLOSE ? rawMarks : excessMarks;
+
+                if (validScorableMarks > 0) {
+                  const pointsValue = baseNumber === BULL ? 25 : baseNumber;
+                  const points = validScorableMarks * pointsValue;
+
+                  if (room.cricketScoringMode === 'cutthroat') {
+                    updatedPlayers.forEach((op, opIdx) => {
+                      if (opIdx !== activeIdx && (op.cricketMarks?.[targetKey] || 0) < MARKS_TO_CLOSE) {
+                        op.score = (op.score || 0) + points;
+                        op.totalPoints = (op.totalPoints || 0) + points;
+                      }
+                    });
+                  } else {
+                    p.score = (p.score || 0) + points;
+                    p.totalPoints = (p.totalPoints || 0) + points;
                   }
-                });
-              } else {
-                p.score = (p.score || 0) + points;
-                p.totalPoints = (p.totalPoints || 0) + points;
+                }
               }
+
+              validMarksThisThrow = marksApplied + validScorableMarks;
             }
           }
         }
       }
       
-      const isMissed = baseNumber === 0 || !isValidCricketTarget(baseNumber, targets);
-      if (isMissed) {
+      p.cricketTotalMarks = (p.cricketTotalMarks || 0) + validMarksThisThrow;
+      p.cricketCurrentRoundMarks = (p.cricketCurrentRoundMarks || 0) + validMarksThisThrow;
+
+      if (!wasUsefulHit) {
         p.missedDarts = (p.missedDarts || 0) + 1;
       }
       
       p.currentRoundThrows = [...(p.currentRoundThrows || []), label];
     }
     
-    // Calcul des statistiques de précision et du tour fini à la fin de la volée
-    p.accuracy = parseFloat((((p.throwsCount - (p.missedDarts || 0)) / p.throwsCount) * 100).toFixed(1));
-    
-    // Si c'est un tour complet (ou dernier lancer de la simulation pour ce joueur), on calcule le tour blanc / meilleur tour
-    const throwsThisRoundCount = p.currentRoundThrows.length;
-    const roundHistory = p.history.slice(p.history.length - throwsThisRoundCount);
-    let marksThisRound = 0;
-    
-    roundHistory.forEach(rawPoints => {
-      if (rawPoints > 0) {
-        let baseNum = 0;
-        let m = 1;
-        if (rawPoints > 100) {
-          baseNum = rawPoints % 100;
-          m = Math.floor(rawPoints / 100);
-        } else if (rawPoints === 25) {
-          baseNum = 25; m = 1;
-        } else if (rawPoints === 50) {
-          baseNum = 25; m = 2;
-        }
-        if (baseNum > 0 && isValidCricketTarget(baseNum, targets)) {
-          let rawMarks = m;
-          if (baseNum === BULL) rawMarks = Math.min(rawMarks, 2);
-          marksThisRound += rawMarks;
-        }
-      }
-    });
-
-    if (marksThisRound === 0) {
-      p.whiteRounds = (p.whiteRounds || 0) + 1;
-    }
-    p.bestCricketRound = Math.max(p.bestCricketRound || 0, marksThisRound);
+    // Calcul de la précision
+    p.accuracy = p.throwsCount > 0 ? parseFloat((((p.throwsCount - (p.missedDarts || 0)) / p.throwsCount) * 100).toFixed(1)) : 0;
     
     playerIndices[activeIdx] += lancersDuTour;
     
+    // Ne comptabiliser le Tour Blanc et le Meilleur Tour QUE si le tour de 3 fléchettes est réellement achevé
     if (p.dartsLeft === 0) {
+      const marksThisRound = p.cricketCurrentRoundMarks || 0;
+      if (marksThisRound === 0) {
+        p.whiteRounds = (p.whiteRounds || 0) + 1;
+      }
+      p.bestCricketRound = Math.max(p.bestCricketRound || 0, marksThisRound);
+
       p.dartsLeft = 3;
+      p.cricketCurrentRoundMarks = 0;
       activeIdx = (activeIdx + 1) % updatedPlayers.length;
     }
   }
   
-  // Recalculer les moyennes (MPR) de chaque joueur à la fin de la simulation
+  // Recalculer les moyennes officielles (MPR) de chaque joueur à la fin de la simulation
   for (const p of updatedPlayers) {
-    const totalMarks = Object.values(p.cricketMarks || {}).reduce(
-      (sum, m) => sum + Math.min(m, MARKS_TO_CLOSE), 0
-    );
-    const rounds = Math.ceil(p.throwsCount / 3);
-    p.avg = rounds > 0 ? parseFloat((totalMarks / rounds).toFixed(2)) : 0;
+    p.avg = p.throwsCount > 0
+      ? parseFloat((((p.cricketTotalMarks || 0) / p.throwsCount) * 3).toFixed(2))
+      : 0;
     p.accuracy = p.throwsCount > 0 ? parseFloat((((p.throwsCount - (p.missedDarts || 0)) / p.throwsCount) * 100).toFixed(1)) : 0;
   }
   

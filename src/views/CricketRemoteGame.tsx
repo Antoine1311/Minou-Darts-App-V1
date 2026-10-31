@@ -3,6 +3,7 @@ import { ArrowLeft, Settings, Tv } from 'lucide-react';
 import type { RoomData } from '../services/roomService';
 import { roomService } from '../services/roomService';
 import { processCricketThrow } from '../services/cricketEngine';
+import { haptics } from '../services/haptics';
 
 interface CricketRemoteGameProps {
   currentRoom: RoomData;
@@ -43,6 +44,7 @@ export const CricketRemoteGame: React.FC<CricketRemoteGameProps> = ({
 
   const handleCricketThrow = async (baseNumber: number) => {
     if (!currentRoom || isSubmitting) return;
+    haptics.tap();
     setIsSubmitting(true);
 
     // Convertir le multiplicateur lettre en chiffre
@@ -146,9 +148,14 @@ export const CricketRemoteGame: React.FC<CricketRemoteGameProps> = ({
           </div>
         )}
 
-        {/* Bandeau de description du mode de jeu */}
+        {/* Bandeau de description du mode de jeu en français */}
         <div className="bg-[#121212] py-2 px-4 border-b border-zinc-900 text-xs text-zinc-400 font-medium tracking-wide">
-          {currentRoom?.cricketScoringMode === 'cutthroat' ? 'Points Off (Cut Throat)' : 'Points On'}, Normal, First to 1 Set 1 Leg
+          {currentRoom?.cricketScoringMode === 'cutthroat'
+            ? 'Mode Gorge Tranchée (Cut-Throat)'
+            : 'Mode Standard (Points activés)'}
+          {' • '}
+          {currentRoom?.cricketVariant === 'crazy' ? 'Crazy Cricket' : 'Classique'}
+          {` • ${cricketTargets.length} cibles`}
         </div>
 
         {/* Table comparative du Cricket avec défilement des colonnes joueurs */}
@@ -351,7 +358,10 @@ export const CricketRemoteGame: React.FC<CricketRemoteGameProps> = ({
             
             {/* Bouton Retour (Correction) */}
             <button
-              onClick={handleCricketUndo}
+              onClick={() => {
+                haptics.undo();
+                handleCricketUndo();
+              }}
               disabled={isSubmitting}
               className="col-span-2 bg-[#dc2626] hover:bg-red-500 active:scale-95 text-white font-extrabold py-3.5 rounded-xl text-sm flex items-center justify-center transition-all cursor-pointer disabled:opacity-40 select-none touch-manipulation gap-1.5"
               title="Corriger le dernier lancer"
@@ -370,23 +380,26 @@ export const CricketRemoteGame: React.FC<CricketRemoteGameProps> = ({
               const isBull = target === 25;
               const targetLabel = isBull ? '25' : String(target);
               const isTripleBullForbidden = isBull && multiplier === 'T';
+              const allClosed = players.length > 0 && players.every(p => (p.cricketMarks?.[String(target)] || 0) >= 3);
               
-              // Couleur dynamique pour les touches rapides en bas (Sales orientation, premium look)
-              const quickBgClass = isTripleBullForbidden
-                ? 'bg-zinc-900 text-zinc-650 opacity-20 cursor-not-allowed border border-zinc-800'
-                : multiplier === 'D'
-                  ? 'bg-yellow-500 text-black hover:bg-yellow-400 shadow-md shadow-yellow-900/20'
-                  : multiplier === 'T'
-                    ? 'bg-red-600 text-white hover:bg-red-500 shadow-md shadow-red-900/20'
-                    : isBull
-                      ? 'bg-red-600 hover:bg-red-500 text-white disabled:opacity-40 shadow-red-900/20'
-                      : 'bg-[#2a2a2a] hover:bg-zinc-700 active:scale-95 text-white disabled:opacity-40 shadow-black/30';
+              // Couleur dynamique pour les touches rapides en bas (désactivées si cible fermée par tous)
+              const quickBgClass = allClosed
+                ? 'bg-green-950/40 text-green-800 border border-green-900/40 opacity-40 cursor-not-allowed shadow-none'
+                : isTripleBullForbidden
+                  ? 'bg-zinc-900 text-zinc-650 opacity-20 cursor-not-allowed border border-zinc-800'
+                  : multiplier === 'D'
+                    ? 'bg-yellow-500 text-black hover:bg-yellow-400 shadow-md shadow-yellow-900/20'
+                    : multiplier === 'T'
+                      ? 'bg-red-600 text-white hover:bg-red-500 shadow-md shadow-red-900/20'
+                      : isBull
+                        ? 'bg-red-600 hover:bg-red-500 text-white disabled:opacity-40 shadow-red-900/20'
+                        : 'bg-[#2a2a2a] hover:bg-zinc-700 active:scale-95 text-white disabled:opacity-40 shadow-black/30';
 
               return (
                 <button
                   key={target}
                   onClick={() => handleCricketThrow(target)}
-                  disabled={isSubmitting || isTripleBullForbidden}
+                  disabled={isSubmitting || isTripleBullForbidden || allClosed}
                   className={`font-black py-4.5 rounded-2xl text-xl sm:text-2xl transition-all cursor-pointer select-none touch-manipulation shadow-md ${quickBgClass}`}
                 >
                   {targetLabel}
