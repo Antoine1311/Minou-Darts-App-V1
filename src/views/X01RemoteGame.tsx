@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Settings, Tv, Target, Smartphone } from 'lucide-react';
 import type { RoomData } from '../services/roomService';
-import { useGameStore } from '../store/gameStore';
+import { roomService } from '../services/roomService';
+import { playerService } from '../services/playerService';
+import { calculateNextX01State, undoX01Throw } from '../services/x01Engine';
 import { getCheckoutSuggestion } from '../services/checkoutSuggestions';
 import { haptics } from '../services/haptics';
 
@@ -33,9 +35,12 @@ const describeArc = (x: number, y: number, innerRadius: number, outerRadius: num
     'Z',
   ].join(' ');
 };
+
 interface X01RemoteGameProps {
   currentRoom: RoomData;
   isLocalMode: boolean;
+  roomId: string | null;
+  setLocalRoom: React.Dispatch<React.SetStateAction<RoomData | null>>;
   setShowExitModal: (v: boolean) => void;
   setShowProjectionModal: (v: boolean) => void;
   setShowProjectorSettingsModal: (v: boolean) => void;
@@ -47,6 +52,8 @@ interface X01RemoteGameProps {
 export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
   currentRoom,
   isLocalMode,
+  roomId,
+  setLocalRoom,
   setShowExitModal,
   setShowProjectionModal,
   setShowProjectorSettingsModal,
@@ -54,7 +61,6 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
   updateRoomState,
   error
 }) => {
-  const { recordThrowX01, undoX01 } = useGameStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const renderLargeThrowBadge = (dart: string, index: number, isActiveThrow: boolean) => {
@@ -127,7 +133,7 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
   
   const [multiplier, setMultiplier] = useState<'S' | 'D' | 'T'>('S');
 
-  // Remplace handleThrowDirect de RemoteView par la nouvelle version Zustand optimisée
+  // Enregistrement d'un lancer X01 unifié (Local autonome & En ligne connecté)
   const handleThrowDirect = async (basePoints: number, customMultiplier?: 'S' | 'D' | 'T') => {
     if (!currentRoom || isSubmitting) return;
 
@@ -161,22 +167,58 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
 
     try {
       setMultiplier('S');
-      await recordThrowX01(points, isDouble, label);
+      const nextState = calculateNextX01State(currentRoom, points, isDouble, label);
+      const justFinished = !currentRoom.statsRecorded && currentRoom.status !== 'finished' && nextState.status === 'finished';
+      if (justFinished) {
+        nextState.statsRecorded = true;
+      }
+
+      const effectiveLocalMode = isLocalMode || currentRoom.roomId === 'LOCAL';
+
+      if (effectiveLocalMode) {
+        if (justFinished) {
+          roomService.recordMatchStats(nextState);
+          playerService.recordLocalMatchHistory(nextState);
+        }
+        setLocalRoom(nextState);
+      } else if (roomId) {
+        // En mode connecté : mise à jour optimiste locale immédiate (réactivité instantanée)
+        setLocalRoom(nextState);
+        // Synchronisation Firestore
+        await roomService.recordThrow(roomId, currentRoom, points, isDouble, label);
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Erreur lors de l'enregistrement du lancer X01:", err);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleUndo = async () => {
-    if (isSubmitting) return;
+    if (isSubmitting || !currentRoom) return;
     haptics.undo();
     setIsSubmitting(true);
     try {
-      await undoX01();
-    } catch(err) {
-      console.error(err);
+      const partialUndo = undoX01Throw(currentRoom);
+      if (!partialUndo) return;
+
+      const wasFinishedWithStats = currentRoom.status === 'finished' && !!currentRoom.statsRecorded;
+      if (wasFinishedWithStats) {
+        roomService.revertMatchStats(currentRoom);
+        partialUndo.statsRecorded = false;
+      }
+
+      const nextState = { ...currentRoom, ...partialUndo } as RoomData;
+      const effectiveLocalMode = isLocalMode || currentRoom.roomId === 'LOCAL';
+
+      if (effectiveLocalMode) {
+        setLocalRoom(nextState);
+      } else if (roomId) {
+        setLocalRoom(nextState);
+        await roomService.updateRoom(roomId, partialUndo);
+      }
+    } catch (err) {
+      console.error("Erreur lors de l'annulation X01:", err);
     } finally {
       setIsSubmitting(false);
     }
@@ -669,14 +711,14 @@ export const X01RemoteGame: React.FC<X01RemoteGameProps> = ({
                         user-select: none;
                       }
                     `}} />
-                    <circle cx={centerX} cy={centerY} r={rDoubleOuter} fill="none" stroke="#27272a" strokeWidth="1" />
+                    <circle cx={centerX} cy={centerY} r={rDoubleOuter} fill="none" stroke="#27272a" strokeWidth="1" className="pointer-events-none" />
                     {segments}
                     {texts}
-                    <circle cx={centerX} cy={centerY} r={rBullOuter} fill="none" stroke="#52525b" strokeWidth="0.75" />
-                    <circle cx={centerX} cy={centerY} r={rTripleInner} fill="none" stroke="#52525b" strokeWidth="0.75" />
-                    <circle cx={centerX} cy={centerY} r={rTripleOuter} fill="none" stroke="#52525b" strokeWidth="0.75" />
-                    <circle cx={centerX} cy={centerY} r={rDoubleInner} fill="none" stroke="#52525b" strokeWidth="0.75" />
-                    <circle cx={centerX} cy={centerY} r={rDoubleOuter} fill="none" stroke="#52525b" strokeWidth="1" />
+                    <circle cx={centerX} cy={centerY} r={rBullOuter} fill="none" stroke="#52525b" strokeWidth="0.75" className="pointer-events-none" />
+                    <circle cx={centerX} cy={centerY} r={rTripleInner} fill="none" stroke="#52525b" strokeWidth="0.75" className="pointer-events-none" />
+                    <circle cx={centerX} cy={centerY} r={rTripleOuter} fill="none" stroke="#52525b" strokeWidth="0.75" className="pointer-events-none" />
+                    <circle cx={centerX} cy={centerY} r={rDoubleInner} fill="none" stroke="#52525b" strokeWidth="0.75" className="pointer-events-none" />
+                    <circle cx={centerX} cy={centerY} r={rDoubleOuter} fill="none" stroke="#52525b" strokeWidth="1" className="pointer-events-none" />
                   </svg>
                 </div>
               );

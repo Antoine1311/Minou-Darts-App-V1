@@ -36,13 +36,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   }),
 
   // Synchronise le store local avec la source de vérité Firebase
-  // L'Optimistic UI ignore les snapshots intermédiaires tant que des écritures locales sont en vol
   syncFromFirebase: (firebaseRoom) => {
-    const { localRoom, pendingWrites } = get();
-    if (!localRoom || pendingWrites === 0) {
-      set({ localRoom: firebaseRoom });
-      return;
-    }
+    set({ localRoom: firebaseRoom });
   },
 
   recordThrowX01: async (points, isDouble = false, throwLabel) => {

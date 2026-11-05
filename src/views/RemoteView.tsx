@@ -1093,6 +1093,8 @@ export const RemoteView: React.FC = () => {
       <X01RemoteGame
         currentRoom={currentRoom}
         isLocalMode={isLocalMode}
+        roomId={roomId}
+        setLocalRoom={setLocalRoom}
         setShowExitModal={setShowExitModal}
         setShowProjectionModal={setShowProjectionModal}
         setShowProjectorSettingsModal={setShowProjectorSettingsModal}
