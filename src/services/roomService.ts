@@ -187,13 +187,16 @@ const computePlayerStatsPayload = (room: RoomData, p: Player) => {
 
 export const roomService = {
   /**
-   * Enregistre les statistiques de fin de match pour tous les joueurs ayant un profil Cloud
+   * Enregistre les statistiques de fin de match (Cloud si en ligne, ou mémoire locale du téléphone)
    */
   recordMatchStats: (room: RoomData): void => {
     for (const p of room.players || []) {
-      if (p.globalId && !p.globalId.startsWith('local-player-')) {
-        const { won, points, darts } = computePlayerStatsPayload(room, p);
-        playerService.updatePlayerStats(p.globalId, won, points, darts).catch(console.error);
+      const { won, points, darts } = computePlayerStatsPayload(room, p);
+      if (p.globalId && !p.globalId.startsWith('local-player-') && navigator.onLine) {
+        playerService.updatePlayerStats(p.globalId, won, points, darts, p.name).catch(console.error);
+      } else {
+        // Sauvegarde immédiate dans la mémoire locale du téléphone
+        playerService.updateLocalPlayerStats(p.globalId || p.name, won, points, darts);
       }
     }
   },
@@ -204,9 +207,12 @@ export const roomService = {
   revertMatchStats: (room: RoomData): void => {
     if (!room.statsRecorded) return;
     for (const p of room.players || []) {
-      if (p.globalId && !p.globalId.startsWith('local-player-')) {
-        const { won, points, darts } = computePlayerStatsPayload(room, p);
-        playerService.revertPlayerStats(p.globalId, won, points, darts).catch(console.error);
+      const { won, points, darts } = computePlayerStatsPayload(room, p);
+      if (p.globalId && !p.globalId.startsWith('local-player-') && navigator.onLine) {
+        playerService.revertPlayerStats(p.globalId, won, points, darts, p.name).catch(console.error);
+      } else {
+        // Annulation immédiate dans la mémoire locale du téléphone
+        playerService.revertLocalPlayerStats(p.globalId || p.name, won, points, darts);
       }
     }
   },
@@ -270,6 +276,7 @@ export const roomService = {
    * S'abonne aux modifications en temps réel d'un salon
    */
   subscribeToRoom: (roomId: string, onUpdate: (room: RoomData) => void, onError?: (err: any) => void) => {
+    if (roomId === 'LOCAL') return () => {};
     const roomRef = doc(db, 'rooms', roomId.toUpperCase());
     
     return onSnapshot(roomRef, (docSnap) => {
@@ -287,6 +294,7 @@ export const roomService = {
    * Met à jour directement les données brutes d'un salon
    */
   updateRoom: async (roomId: string, data: Partial<RoomData>): Promise<void> => {
+    if (roomId === 'LOCAL') return;
     const roomRef = doc(db, 'rooms', roomId.toUpperCase());
     await updateDoc(roomRef, {
       ...data,
@@ -298,6 +306,7 @@ export const roomService = {
    * Enregistre un lancer de fléchette pour le joueur actif et calcule les scores
    */
   recordThrow: async (roomId: string, room: RoomData, points: number, isDouble: boolean = false, throwLabel?: string): Promise<void> => {
+    if (roomId === 'LOCAL') return;
     const nextRoomState = calculateNextX01State(room, points, isDouble, throwLabel);
     const justFinished = !room.statsRecorded && room.status !== 'finished' && nextRoomState.status === 'finished';
 
@@ -322,6 +331,7 @@ export const roomService = {
    * Délègue la logique métier au cricketEngine.
    */
   recordCricketThrow: async (roomId: string, room: RoomData, baseNumber: number, multiplier: number): Promise<void> => {
+    if (roomId === 'LOCAL') return;
     const { updatedRoom } = processCricketThrow(room, baseNumber, multiplier);
     const justFinished = !room.statsRecorded && room.status !== 'finished' && updatedRoom.status === 'finished';
 
@@ -340,6 +350,9 @@ export const roomService = {
    * Récupère la liste des salons actifs créés par un utilisateur spécifique
    */
   getUserActiveRooms: async (userId: string): Promise<RoomData[]> => {
+    if (!navigator.onLine) {
+      return [];
+    }
     try {
       const roomsRef = collection(db, 'rooms');
       const q = query(

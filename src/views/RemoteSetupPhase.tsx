@@ -67,8 +67,8 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
 
   // Charger les joueurs depuis Firebase avec secours localStorage
   useEffect(() => {
-    const localPlayers: GlobalPlayer[] = JSON.parse(localStorage.getItem('minou-dart-local-saved-players') || '[]');
-    if (user) {
+    const localPlayers = playerService.getLocalPlayers();
+    if (user && !isLocalMode && navigator.onLine) {
       playerService.getPlayersByOwner(user.uid)
         .then(players => {
           const combined = [...players];
@@ -88,26 +88,23 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
       setIsPlayersLoaded(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
-  }, [user]);
+  }, [user, isLocalMode]);
 
   const handleRemoveSavedPlayer = async (name: string) => {
     const playerToRemove = savedPlayers.find(p => p.name === name);
-    // Purger systématiquement du localStorage pour éviter toute réapparition ("joueur zombie")
-    try {
-      const localSaved: GlobalPlayer[] = JSON.parse(localStorage.getItem('minou-dart-local-saved-players') || '[]');
-      const filteredLocal = localSaved.filter(p => p.name !== name && p.id !== playerToRemove?.id);
-      localStorage.setItem('minou-dart-local-saved-players', JSON.stringify(filteredLocal));
-    } catch (e) {
-      console.error("Erreur mise à jour localStorage lors de la suppression:", e);
+    // Purger systématiquement du stockage local
+    playerService.deleteLocalPlayer(name);
+    if (playerToRemove?.id) {
+      playerService.deleteLocalPlayer(playerToRemove.id);
     }
 
     if (playerToRemove) {
-      try {
-        if (user && !playerToRemove.id.startsWith('local-player-')) {
+      if (!isLocalMode && user && navigator.onLine && !playerToRemove.id.startsWith('local-player-')) {
+        try {
           await playerService.deletePlayer(playerToRemove.id);
+        } catch (err) {
+          console.error("Erreur suppression joueur Cloud:", err);
         }
-      } catch (err) {
-        console.error("Erreur suppression joueur Cloud:", err);
       }
       setSavedPlayers(prev => prev.filter(p => p.id !== playerToRemove.id && p.name !== name));
       setSelectedPlayerNames(prev => {
@@ -120,20 +117,15 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
 
   const handleUpdatePlayerEmoji = async (name: string, newEmoji: string) => {
     const playerToUpdate = savedPlayers.find(p => p.name === name);
-    // Synchroniser systématiquement l'emoji en localStorage
-    try {
-      const localSaved: GlobalPlayer[] = JSON.parse(localStorage.getItem('minou-dart-local-saved-players') || '[]');
-      if (localSaved.some(p => p.name === name)) {
-        const updatedLocal = localSaved.map(p => p.name === name ? { ...p, emoji: newEmoji } : p);
-        localStorage.setItem('minou-dart-local-saved-players', JSON.stringify(updatedLocal));
-      }
-    } catch (e) {
-      console.error("Erreur mise à jour emoji localStorage:", e);
+    // Mettre à jour en local
+    playerService.updateLocalPlayerEmoji(name, newEmoji);
+    if (playerToUpdate?.id) {
+      playerService.updateLocalPlayerEmoji(playerToUpdate.id, newEmoji);
     }
 
     if (playerToUpdate) {
       setSavedPlayers(prev => prev.map(p => p.id === playerToUpdate.id ? { ...p, emoji: newEmoji } : p));
-      if (user && !playerToUpdate.id.startsWith('local-player-')) {
+      if (!isLocalMode && user && navigator.onLine && !playerToUpdate.id.startsWith('local-player-')) {
         try {
           await playerService.updatePlayerEmoji(playerToUpdate.id, newEmoji);
         } catch (err) {
@@ -209,43 +201,21 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
     const name = newPlayerName.trim();
     if (!name) return;
 
-    const emptyStats = { gamesPlayed: 0, wins: 0, totalPoints: 0, dartsThrown: 0 };
-
-    if (!savedPlayers.some(p => p.name === name)) {
+    if (!savedPlayers.some(p => p.name.toLowerCase() === name.toLowerCase())) {
       try {
         let newPlayer: GlobalPlayer;
-        if (user && !isLocalMode) {
+        if (isLocalMode || !user || !navigator.onLine) {
+          newPlayer = playerService.saveLocalPlayer(name, selectedEmoji);
+        } else {
           try {
             newPlayer = await playerService.createPlayer(user.uid, name, selectedEmoji);
           } catch {
-            newPlayer = {
-              id: `local-player-${Date.now()}`,
-              ownerId: user.uid,
-              name,
-              emoji: selectedEmoji || '🎯',
-              stats: emptyStats,
-              createdAt: new Date()
-            };
+            newPlayer = playerService.saveLocalPlayer(name, selectedEmoji);
           }
-        } else {
-          newPlayer = {
-            id: `local-player-${Date.now()}`,
-            ownerId: user ? user.uid : 'local',
-            name,
-            emoji: selectedEmoji || '🎯',
-            stats: emptyStats,
-            createdAt: new Date()
-          };
         }
 
-        // Sauvegarde locale persistante
-        const localSaved: GlobalPlayer[] = JSON.parse(localStorage.getItem('minou-dart-local-saved-players') || '[]');
-        if (!localSaved.some(p => p.name === name)) {
-          localStorage.setItem('minou-dart-local-saved-players', JSON.stringify([...localSaved, newPlayer]));
-        }
-
-        setSavedPlayers(prev => [...prev, newPlayer].sort((a, b) => a.name.localeCompare(b.name)));
-        setSelectedPlayerNames(prev => [...prev, name]);
+        setSavedPlayers(prev => [...prev.filter(p => p.name !== newPlayer.name), newPlayer].sort((a, b) => a.name.localeCompare(b.name)));
+        setSelectedPlayerNames(prev => [...prev, newPlayer.name]);
       } catch (err) {
         console.error("Erreur création joueur:", err);
       }
@@ -597,24 +567,32 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
                                 {orderLabel}
                               </span>
                             )}
-                            <span className={`font-bold flex items-center gap-2 ${isSelected ? 'text-theme-accent' : 'text-theme-text-primary'}`}>
-                              <span>{player.name}</span>
-                              <select
-                                value={player.emoji || '🎯'}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  handleUpdatePlayerEmoji(player.name, e.target.value);
-                                }}
-                                className="text-sm bg-black/40 hover:bg-black/60 border border-theme-border/20 rounded-md p-0.5 px-1 cursor-pointer focus:outline-none"
-                              >
-                                {AVAILABLE_EMOJIS.map((emoji) => (
-                                  <option key={emoji} value={emoji} className="bg-zinc-950 text-white">
-                                    {emoji}
-                                  </option>
-                                ))}
-                              </select>
-                            </span>
+                            <div className="flex flex-col">
+                              <span className={`font-bold flex items-center gap-2 ${isSelected ? 'text-theme-accent' : 'text-theme-text-primary'}`}>
+                                <span>{player.name}</span>
+                                <select
+                                  value={player.emoji || '🎯'}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    handleUpdatePlayerEmoji(player.name, e.target.value);
+                                  }}
+                                  className="text-sm bg-black/40 hover:bg-black/60 border border-theme-border/20 rounded-md p-0.5 px-1 cursor-pointer focus:outline-none"
+                                >
+                                  {AVAILABLE_EMOJIS.map((emoji) => (
+                                    <option key={emoji} value={emoji} className="bg-zinc-950 text-white">
+                                      {emoji}
+                                    </option>
+                                  ))}
+                                </select>
+                              </span>
+                              {player.stats && player.stats.gamesPlayed > 0 && (
+                                <span className="text-[10px] text-theme-text-secondary font-medium">
+                                  {player.stats.wins} victoires / {player.stats.gamesPlayed} parties
+                                  {player.stats.dartsThrown > 0 ? ` • Moy. ${(Math.round((player.stats.totalPoints / player.stats.dartsThrown) * 30) / 10).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} pts` : ''}
+                                </span>
+                              )}
+                            </div>
                           </div>
                           
                           <button

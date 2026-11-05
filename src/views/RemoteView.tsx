@@ -43,6 +43,7 @@ export const RemoteView: React.FC = () => {
   const initLocalRoom = () => {
     setIsLocalMode(true);
     setRoomId('LOCAL');
+    window.location.hash = '#/remote?mode=local';
     setLocalRoom({
       roomId: 'LOCAL',
       theme: 'modern',
@@ -698,6 +699,7 @@ export const RemoteView: React.FC = () => {
           setError("Code de salon invalide ou session expirée.");
           setRoomId(null);
           setRoom(null);
+          window.location.hash = '#/remote';
         } else {
           setError("Connexion réseau perturbée. Reconnexion en cours...");
         }

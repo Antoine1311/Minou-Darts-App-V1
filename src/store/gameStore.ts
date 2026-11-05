@@ -39,6 +39,11 @@ export const useGameStore = create<GameState>((set, get) => ({
 
     // En mode local autonome, application immédiate sans appel réseau Firebase
     if (localRoom.roomId === 'LOCAL') {
+      const justFinished = !localRoom.statsRecorded && localRoom.status !== 'finished' && nextState.status === 'finished';
+      if (justFinished) {
+        nextState.statsRecorded = true;
+        roomService.recordMatchStats(nextState);
+      }
       set({ localRoom: nextState });
       return;
     }

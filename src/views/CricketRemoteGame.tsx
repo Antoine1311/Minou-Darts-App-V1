@@ -54,11 +54,19 @@ export const CricketRemoteGame: React.FC<CricketRemoteGameProps> = ({
     try {
       if (isLocalMode) {
         const { updatedRoom } = processCricketThrow(currentRoom, baseNumber, mult);
+        const justFinished = !currentRoom.statsRecorded && currentRoom.status !== 'finished' && updatedRoom.status === 'finished';
+        const finalRoom = {
+          ...updatedRoom,
+          ...(justFinished ? { statsRecorded: true } : {})
+        };
+        if (justFinished) {
+          roomService.recordMatchStats({ ...currentRoom, ...finalRoom } as RoomData);
+        }
         setLocalRoom((prev: any) => {
           if (!prev) return null;
           return {
             ...prev,
-            ...updatedRoom
+            ...finalRoom
           } as RoomData;
         });
       } else if (roomId && currentRoom) {

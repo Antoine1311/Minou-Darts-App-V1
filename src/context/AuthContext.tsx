@@ -23,19 +23,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(currentUser);
       setLoading(false);
       
-      // Connexion anonyme automatique s'il n'y a pas d'utilisateur (idéal pour un accès rapide aux bornes/télécommandes)
-      if (!currentUser) {
+      // Connexion anonyme automatique s'il n'y a pas d'utilisateur et que le réseau est disponible
+      if (!currentUser && navigator.onLine) {
         try {
           setLoading(true);
           await signInAnonymously(auth);
         } catch (error) {
-          console.error("Erreur lors de la connexion anonyme automatique :", error);
+          console.warn("Échec de connexion anonyme automatique (mode hors-ligne actif):", error);
           setLoading(false);
         }
       }
     });
 
-    return () => unsubscribe();
+    const handleOnline = async () => {
+      if (!auth.currentUser && navigator.onLine) {
+        try {
+          await signInAnonymously(auth);
+        } catch (_) {}
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', handleOnline);
+    };
   }, []);
 
   const loginAnonymously = async () => {
