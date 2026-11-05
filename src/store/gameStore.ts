@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { RoomData } from '../services/roomService';
 import { roomService } from '../services/roomService';
+import { playerService } from '../services/playerService';
 import { calculateNextX01State, undoX01Throw } from '../services/x01Engine';
 
 interface GameState {
@@ -13,15 +14,29 @@ interface GameState {
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
-  localRoom: null,
+  localRoom: (() => {
+    try {
+      return playerService.getActiveLocalGame();
+    } catch {
+      return null;
+    }
+  })(),
   pendingWrites: 0,
 
-  setLocalRoom: (updater) => set((state) => ({ 
-    localRoom: typeof updater === 'function' ? updater(state.localRoom) : updater 
-  })),
+  setLocalRoom: (updater) => set((state) => {
+    const nextRoom = typeof updater === 'function' ? updater(state.localRoom) : updater;
+    if (nextRoom && nextRoom.roomId === 'LOCAL') {
+      if (nextRoom.status === 'playing' || nextRoom.status === 'finished') {
+        playerService.saveActiveLocalGame(nextRoom);
+      } else {
+        playerService.clearActiveLocalGame();
+      }
+    }
+    return { localRoom: nextRoom };
+  }),
 
   // Synchronise le store local avec la source de vérité Firebase
-  // L'Optimistic UI ignore les snapshots intermédiaires tant que des écritures locales (lancers ou annulations) sont en vol
+  // L'Optimistic UI ignore les snapshots intermédiaires tant que des écritures locales sont en vol
   syncFromFirebase: (firebaseRoom) => {
     const { localRoom, pendingWrites } = get();
     if (!localRoom || pendingWrites === 0) {
@@ -37,13 +52,15 @@ export const useGameStore = create<GameState>((set, get) => ({
     // 1. Calcul de l'état suivant (Optimistic UI)
     const nextState = calculateNextX01State(localRoom, points, isDouble, throwLabel);
 
-    // En mode local autonome, application immédiate sans appel réseau Firebase
+    // En mode local autonome, application immédiate et sauvegarde continue dans le téléphone
     if (localRoom.roomId === 'LOCAL') {
       const justFinished = !localRoom.statsRecorded && localRoom.status !== 'finished' && nextState.status === 'finished';
       if (justFinished) {
         nextState.statsRecorded = true;
         roomService.recordMatchStats(nextState);
+        playerService.recordLocalMatchHistory(nextState);
       }
+      playerService.saveActiveLocalGame(nextState);
       set({ localRoom: nextState });
       return;
     }
@@ -81,11 +98,9 @@ export const useGameStore = create<GameState>((set, get) => ({
 
     const nextState = { ...localRoom, ...partialUndo } as RoomData;
 
-    // En mode local autonome, application immédiate sans appel réseau Firebase
+    // En mode local autonome, application immédiate avec sauvegarde locale continue
     if (localRoom.roomId === 'LOCAL') {
-      if (wasFinishedWithStats) {
-        // Les profils Cloud utilisés en partie locale sont aussi annulés proprement
-      }
+      playerService.saveActiveLocalGame(nextState);
       set({ localRoom: nextState });
       return;
     }

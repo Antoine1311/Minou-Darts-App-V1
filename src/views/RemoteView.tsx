@@ -8,6 +8,7 @@ import { RemoteSetupPhase } from './RemoteSetupPhase';
 import { useTheme } from '../context/ThemeContext';
 import { X, ArrowLeft, RotateCcw, Check, Smartphone, Users, Target, Tv, Copy, ExternalLink, Loader2, Sparkles, Maximize2 } from 'lucide-react';
 import { roomService } from '../services/roomService';
+import { playerService } from '../services/playerService';
 import { useAuth } from '../context/AuthContext';
 import type { RoomData, CalibrationSettings } from '../services/roomService';
 import { undoCricketThrow } from '../services/cricketEngine';
@@ -44,6 +45,18 @@ export const RemoteView: React.FC = () => {
     setIsLocalMode(true);
     setRoomId('LOCAL');
     window.location.hash = '#/remote?mode=local';
+
+    // Si une partie locale active existe déjà, la préserver et ne PAS l'écraser
+    const active = playerService.getActiveLocalGame();
+    if (active && (active.status === 'playing' || active.status === 'finished')) {
+      setLocalRoom(active);
+      return;
+    }
+
+    if (currentRoom && currentRoom.roomId === 'LOCAL' && (currentRoom.status === 'playing' || currentRoom.status === 'finished')) {
+      return;
+    }
+
     setLocalRoom({
       roomId: 'LOCAL',
       theme: 'modern',
@@ -953,7 +966,9 @@ export const RemoteView: React.FC = () => {
             setRoom(null);
             setIsLocalMode(false);
             setLocalRoom(null);
+            playerService.clearActiveLocalGame();
             setInitialSetupStep('players');
+            window.location.hash = '#/';
           }}
           setShowProjectorSettingsModal={setShowProjectorSettingsModal}
           setShowProjectionModal={setShowProjectionModal}
@@ -984,8 +999,9 @@ export const RemoteView: React.FC = () => {
           setRoomId(null);
           setRoom(null);
           setLocalRoom(null);
+          playerService.clearActiveLocalGame();
           setInitialSetupStep('players');
-          window.location.hash = '#/remote';
+          window.location.hash = '#/';
         }}
         handleCricketUndo={handleCricketUndo}
       />

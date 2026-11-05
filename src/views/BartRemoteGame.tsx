@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Tv, Target, XCircle, Award, RotateCcw, Settings } from 'lucide-react';
 import type { RoomData } from '../services/roomService';
 import { roomService } from '../services/roomService';
+import { playerService } from '../services/playerService';
 import { processBartTargetSelection, processBartResolution, undoBartAction } from '../services/bartEngine';
 
 // --- Constantes et Utilitaires pour le tracé de la cible SVG ---
@@ -123,6 +124,10 @@ export const BartRemoteGame: React.FC<BartRemoteGameProps> = ({
       }
       if (isLocalMode) {
         setLocalRoom(updatedRoom);
+        if (justFinished) {
+          roomService.recordMatchStats(updatedRoom);
+          playerService.recordLocalMatchHistory(updatedRoom);
+        }
       } else if (roomId) {
         await roomService.updateRoom(roomId, updatedRoom);
         if (justFinished) {

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, Tv, RotateCcw, Check, X, Settings } from 'lucide-react';
 import type { RoomData } from '../services/roomService';
 import { roomService } from '../services/roomService';
+import { playerService } from '../services/playerService';
 import { clockEngine } from '../services/clockEngine';
 
 interface ClockRemoteGameProps {
@@ -57,6 +58,10 @@ export const ClockRemoteGame: React.FC<ClockRemoteGameProps> = ({
       
       if (isLocalMode) {
         setLocalRoom(updatedRoom);
+        if (justFinished) {
+          roomService.recordMatchStats(updatedRoom);
+          playerService.recordLocalMatchHistory(updatedRoom);
+        }
       } else if (roomId) {
         await roomService.updateRoom(roomId, updatedRoom);
         if (justFinished) {

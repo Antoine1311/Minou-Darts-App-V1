@@ -13,12 +13,14 @@ import {
   Plus, 
   Trash2, 
   RotateCcw, 
-  ShieldCheck 
+  ShieldCheck, 
+  Trophy,
+  X
 } from 'lucide-react';
 import { roomService } from '../services/roomService';
 import type { RoomData } from '../services/roomService';
 import { playerService } from '../services/playerService';
-import type { GlobalPlayer } from '../services/playerService';
+import type { GlobalPlayer, LocalMatchRecord } from '../services/playerService';
 import { useAuth } from '../context/AuthContext';
 
 const AVAILABLE_EMOJIS = ['🎯', '😎', '🚀', '👾', '👑', '🔥', '🦁', '🦉', '👻', '😜', '🍀', '⭐'];
@@ -47,6 +49,7 @@ export const HomeView: React.FC = () => {
 
   // États pour le mode Hors-Ligne (Stockage local sur le téléphone)
   const [localPlayers, setLocalPlayers] = useState<GlobalPlayer[]>([]);
+  const [matchHistory, setMatchHistory] = useState<LocalMatchRecord[]>([]);
   const [newPlayerName, setNewPlayerName] = useState<string>('');
   const [newPlayerEmoji, setNewPlayerEmoji] = useState<string>('🎯');
   const [savedActiveGame, setSavedActiveGame] = useState<any | null>(null);
@@ -81,16 +84,9 @@ export const HomeView: React.FC = () => {
   // Recharger les données locales du téléphone
   const refreshLocalData = () => {
     setLocalPlayers(playerService.getLocalPlayers());
-    const savedGameStr = localStorage.getItem('minou-darts-saved-active-game');
-    if (savedGameStr) {
-      try {
-        setSavedActiveGame(JSON.parse(savedGameStr));
-      } catch {
-        setSavedActiveGame(null);
-      }
-    } else {
-      setSavedActiveGame(null);
-    }
+    setMatchHistory(playerService.getLocalMatchHistory());
+    const active = playerService.getActiveLocalGame();
+    setSavedActiveGame(active);
   };
 
   useEffect(() => {
@@ -192,6 +188,15 @@ export const HomeView: React.FC = () => {
     window.location.hash = '#/remote?mode=local';
   };
 
+  // Abandonner la partie locale en cours pour en démarrer une neuve
+  const handleAbandonLocalGame = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm("Voulez-vous abandonner la partie locale en cours ?")) {
+      playerService.clearActiveLocalGame();
+      refreshLocalData();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-theme-bg text-theme-text-primary transition-all duration-300 flex flex-col items-center justify-center p-3 sm:p-4 md:p-8">
       {/* Conteneur principal moderne et premium */}
@@ -273,8 +278,8 @@ export const HomeView: React.FC = () => {
             <div className="p-3.5 bg-theme-accent/10 border border-theme-accent/30 rounded-2xl flex items-start gap-3">
               <ShieldCheck className="w-5 h-5 text-theme-accent flex-shrink-0 mt-0.5" />
               <div className="text-xs text-theme-text-secondary leading-relaxed">
-                <strong className="text-white font-semibold">Stockage 100% autonome : </strong> 
-                Toutes vos données (scores, moyennes, historique des lancers et profils des joueurs) sont conservées exclusivement dans la mémoire interne de ce smartphone. Aucune connexion internet n'est requise.
+                <strong className="text-white font-semibold">Stockage 100% autonome et persistant : </strong> 
+                Toutes vos données (scores en cours, historique complet des matchs et profils des joueurs) sont conservées en continu dans la mémoire de votre téléphone. Même si vous quittez ou éteignez l'écran, vos scores sont préservés.
               </div>
             </div>
 
@@ -288,7 +293,7 @@ export const HomeView: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                     <span className="text-xs font-black text-green-400 uppercase tracking-wider">
-                      Partie locale en cours
+                      Partie locale en cours mémorisée
                     </span>
                   </div>
                   <p className="text-sm font-bold text-white">
@@ -301,13 +306,25 @@ export const HomeView: React.FC = () => {
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  className="px-3.5 py-2 bg-green-500 group-hover:bg-green-400 text-black font-extrabold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-md flex-shrink-0"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reprendre</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResumeLocalGame}
+                    className="px-3.5 py-2 bg-green-500 group-hover:bg-green-400 text-black font-extrabold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-md flex-shrink-0 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reprendre</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleAbandonLocalGame}
+                    className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl transition-colors cursor-pointer flex-shrink-0"
+                    title="Abandonner cette partie"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -315,22 +332,107 @@ export const HomeView: React.FC = () => {
             <button
               type="button"
               onClick={() => {
+                // Si aucune partie en cours, on ouvre directement le lobby
+                playerService.clearActiveLocalGame();
                 window.location.hash = '#/remote?mode=local';
               }}
               className="w-full group relative py-4 bg-theme-accent hover:bg-theme-accent-hover text-black font-extrabold text-sm sm:text-base rounded-2xl transition-all shadow-lg shadow-theme-accent/20 flex items-center justify-center gap-3 cursor-pointer active:scale-[0.99]"
             >
               <Gamepad2 className="w-5 h-5 group-hover:scale-110 transition-transform duration-300" />
-              <span>NOUVELLE PARTIE HORS-LIGNE</span>
+              <span>{savedActiveGame ? 'COMMENCER UNE NOUVELLE PARTIE' : 'NOUVELLE PARTIE HORS-LIGNE'}</span>
               <ArrowRight className="w-4 h-4 opacity-70 group-hover:translate-x-1 transition-transform" />
             </button>
 
-            {/* SECTION DE GESTION DES JOUEURS LOCAUX */}
+            {/* HISTORIQUE DES DERNIERS MATCHS JOUÉS SUR CE TÉLÉPHONE */}
+            {matchHistory.length > 0 && (
+              <div className="w-full bg-black/40 border border-theme-border/40 rounded-2xl p-4 sm:p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Trophy className="w-4 h-4 text-theme-accent" />
+                    <h3 className="text-xs sm:text-sm font-extrabold text-white uppercase tracking-wider">
+                      Derniers matchs terminés sur ce téléphone
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("Effacer l'historique des matchs locaux ?")) {
+                        playerService.clearLocalMatchHistory();
+                        refreshLocalData();
+                      }
+                    }}
+                    className="text-[10px] text-zinc-500 hover:text-red-400 transition-colors cursor-pointer"
+                  >
+                    Effacer
+                  </button>
+                </div>
+
+                <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+                  {matchHistory.map((match) => {
+                    const dateFormatted = new Date(match.timestamp).toLocaleDateString('fr-FR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    });
+                    const gameLabel = match.gameType === 'x01' ? `X01 (${match.targetScore || 501})` :
+                                     match.gameType === 'cricket' ? 'Cricket' :
+                                     match.gameType === 'bart' ? 'Bart Darts' : "Tour de l'horloge";
+
+                    return (
+                      <div
+                        key={match.id}
+                        className="p-3 bg-black/30 border border-theme-border/30 rounded-xl space-y-2 text-xs"
+                      >
+                        <div className="flex items-center justify-between border-b border-theme-border/20 pb-1.5">
+                          <span className="font-bold text-white flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-theme-accent/20 text-theme-accent text-[9px] font-black uppercase">
+                              {gameLabel}
+                            </span>
+                            <span>Vainqueur : <strong className="text-theme-accent">{match.winnerName} 🏆</strong></span>
+                          </span>
+                          <span className="text-[10px] text-zinc-500 font-mono">
+                            {dateFormatted}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-0.5">
+                          {match.players.map((p, idx) => {
+                            const avgFormatted = (Math.round((p.avg || 0) * 10) / 10).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+                            return (
+                              <div
+                                key={idx}
+                                className={`flex items-center justify-between p-1.5 px-2 rounded-lg text-[11px] ${
+                                  p.won ? 'bg-theme-accent/15 border border-theme-accent/40 font-bold text-white' : 'bg-white/5 text-zinc-300'
+                                }`}
+                              >
+                                <span className="flex items-center gap-1.5 truncate">
+                                  <span>{p.emoji || '🎯'}</span>
+                                  <span className="truncate">{p.name}</span>
+                                </span>
+                                <span className="font-mono text-[10px] text-zinc-400">
+                                  {match.gameType === 'x01' ? `Score: ${p.score} • ` : ''}
+                                  Moy: <strong className={p.won ? 'text-theme-accent' : 'text-zinc-200'}>{avgFormatted}</strong>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* SECTION DE GESTIEON DES JOUEURS LOCAUX */}
             <div className="w-full bg-black/40 border border-theme-border/40 rounded-2xl p-4 sm:p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Users className="w-4 h-4 text-theme-accent" />
                   <h3 className="text-xs sm:text-sm font-extrabold text-white uppercase tracking-wider">
-                    Joueurs enregistrés sur ce téléphone
+                    Profils des joueurs (Mémoire du téléphone)
                   </h3>
                 </div>
                 <span className="text-[10px] bg-theme-accent/20 text-theme-accent font-bold px-2 py-0.5 rounded-full font-mono">

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, Settings, Tv } from 'lucide-react';
 import type { RoomData } from '../services/roomService';
 import { roomService } from '../services/roomService';
+import { playerService } from '../services/playerService';
 import { processCricketThrow } from '../services/cricketEngine';
 import { haptics } from '../services/haptics';
 
@@ -60,7 +61,9 @@ export const CricketRemoteGame: React.FC<CricketRemoteGameProps> = ({
           ...(justFinished ? { statsRecorded: true } : {})
         };
         if (justFinished) {
-          roomService.recordMatchStats({ ...currentRoom, ...finalRoom } as RoomData);
+          const completedRoom = { ...currentRoom, ...finalRoom } as RoomData;
+          roomService.recordMatchStats(completedRoom);
+          playerService.recordLocalMatchHistory(completedRoom);
         }
         setLocalRoom((prev: any) => {
           if (!prev) return null;

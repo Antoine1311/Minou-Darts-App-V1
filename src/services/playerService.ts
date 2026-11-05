@@ -17,7 +17,27 @@ export interface GlobalPlayer {
   createdAt: any;
 }
 
+export interface LocalMatchPlayerSummary {
+  name: string;
+  emoji: string;
+  score: number;
+  avg: number;
+  dartsThrown: number;
+  won: boolean;
+}
+
+export interface LocalMatchRecord {
+  id: string;
+  timestamp: number;
+  gameType: string;
+  targetScore?: number;
+  winnerName: string;
+  players: LocalMatchPlayerSummary[];
+}
+
 const LOCAL_PLAYERS_STORAGE_KEY = 'minou-dart-local-saved-players';
+const LOCAL_MATCH_HISTORY_STORAGE_KEY = 'minou-dart-local-match-history';
+const ACTIVE_LOCAL_GAME_STORAGE_KEY = 'minou_dart_active_local_game';
 
 export const playerService = {
   /**
@@ -365,5 +385,107 @@ export const playerService = {
       console.warn("Erreur annulation statistiques Cloud, repli local :", e);
       playerService.revertLocalPlayerStats(playerName || playerId, won, points, darts);
     }
+  },
+
+  /**
+   * Sauvegarde continue en temps réel de la partie locale active dans la mémoire du téléphone
+   */
+  saveActiveLocalGame: (room: any): void => {
+    try {
+      if (!room || room.roomId !== 'LOCAL' || room.status === 'setup') {
+        localStorage.removeItem(ACTIVE_LOCAL_GAME_STORAGE_KEY);
+        return;
+      }
+      localStorage.setItem(ACTIVE_LOCAL_GAME_STORAGE_KEY, JSON.stringify(room));
+      // Mettre également à jour la clé de secours
+      localStorage.setItem('minou-darts-saved-active-game', JSON.stringify(room));
+    } catch (e) {
+      console.error("Erreur sauvegarde continue de la partie locale:", e);
+    }
+  },
+
+  /**
+   * Récupérer la partie locale active en cours de jeu
+   */
+  getActiveLocalGame: (): any | null => {
+    try {
+      const data = localStorage.getItem(ACTIVE_LOCAL_GAME_STORAGE_KEY) || localStorage.getItem('minou-darts-saved-active-game');
+      if (!data) return null;
+      const parsed = JSON.parse(data);
+      if (parsed && (parsed.status === 'playing' || parsed.status === 'finished')) {
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Effacer la partie locale active
+   */
+  clearActiveLocalGame: (): void => {
+    try {
+      localStorage.removeItem(ACTIVE_LOCAL_GAME_STORAGE_KEY);
+      localStorage.removeItem('minou-darts-saved-active-game');
+    } catch (_) {}
+  },
+
+  /**
+   * Enregistrer une partie terminée dans l'historique des matchs de ce téléphone
+   */
+  recordLocalMatchHistory: (room: any): void => {
+    try {
+      if (!room || !room.players || room.players.length === 0) return;
+      
+      const history = playerService.getLocalMatchHistory();
+      
+      const playersSummary: LocalMatchPlayerSummary[] = (room.players || []).map((p: any) => ({
+        name: p.name,
+        emoji: p.emoji || '🎯',
+        score: p.score ?? 0,
+        avg: p.avg ?? 0,
+        dartsThrown: p.throwsCount || (p.clockState?.throwsCount ?? 0),
+        won: p.name === room.winnerName
+      }));
+
+      const newRecord: LocalMatchRecord = {
+        id: `match-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        timestamp: Date.now(),
+        gameType: room.gameType,
+        targetScore: room.targetScore,
+        winnerName: room.winnerName || '',
+        players: playersSummary
+      };
+
+      // Conserver les 30 derniers matchs sur le téléphone
+      const updatedHistory = [newRecord, ...history.filter(h => h.id !== newRecord.id)].slice(0, 30);
+      localStorage.setItem(LOCAL_MATCH_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
+    } catch (e) {
+      console.error("Erreur enregistrement historique match local :", e);
+    }
+  },
+
+  /**
+   * Récupérer l'historique complet des matchs joués sur ce téléphone
+   */
+  getLocalMatchHistory: (): LocalMatchRecord[] => {
+    try {
+      const data = localStorage.getItem(LOCAL_MATCH_HISTORY_STORAGE_KEY);
+      if (!data) return [];
+      const parsed: LocalMatchRecord[] = JSON.parse(data);
+      return parsed.sort((a, b) => b.timestamp - a.timestamp);
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Effacer l'historique des matchs sur ce téléphone
+   */
+  clearLocalMatchHistory: (): void => {
+    try {
+      localStorage.removeItem(LOCAL_MATCH_HISTORY_STORAGE_KEY);
+    } catch (_) {}
   }
 };
