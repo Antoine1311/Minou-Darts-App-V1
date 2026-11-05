@@ -23,7 +23,17 @@ export const RemoteView: React.FC = () => {
   
   // États de la télécommande
   const [roomIdInput, setRoomIdInput] = useState<string>('');
-  const [roomId, setRoomId] = useState<string | null>(null);
+  const [roomId, setRoomId] = useState<string | null>(() => {
+    // Initialiser immédiatement depuis l'URL au premier montage
+    const hash = window.location.hash;
+    const params = hash.split('?')[1];
+    if (params) {
+      const queryParams = new URLSearchParams(params);
+      const roomParam = queryParams.get('room');
+      if (roomParam) return roomParam.toUpperCase();
+    }
+    return null;
+  });
   
   const currentRoom = useGameStore(state => state.localRoom);
   const setLocalRoom = useGameStore(state => state.setLocalRoom);
@@ -390,8 +400,8 @@ export const RemoteView: React.FC = () => {
   const renderProjectionModal = () => {
     if (!showProjectionModal || !currentRoom) return null;
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
-        <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl relative font-sans text-white">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm overflow-y-auto">
+        <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-3xl p-5 sm:p-6 shadow-2xl relative font-sans text-white my-auto max-h-[92vh] overflow-y-auto">
           <button
             onClick={() => { setShowProjectionModal(false); setLinkCopied(false); }}
             className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-full transition-all cursor-pointer"
@@ -399,13 +409,13 @@ export const RemoteView: React.FC = () => {
             <X className="w-5 h-5" />
           </button>
 
-          <div className="flex flex-col items-center text-center mt-2">
-            <div className="p-3 bg-theme-accent/15 text-theme-accent rounded-full mb-3">
-              <Tv className="w-7 h-7" />
+          <div className="flex flex-col items-center text-center mt-1">
+            <div className="p-2.5 bg-theme-accent/15 text-theme-accent rounded-full mb-2.5">
+              <Tv className="w-6 h-6" />
             </div>
 
             <h2 className="text-lg font-black tracking-wide text-white mb-1 uppercase">Synchroniser le Visualisateur</h2>
-            <p className="text-[11px] text-zinc-500 mb-5 max-w-xs leading-relaxed">
+            <p className="text-[11px] text-zinc-500 mb-4 max-w-xs leading-relaxed">
               Connectez le vidéoprojecteur à cette partie en cours.
             </p>
 
@@ -414,35 +424,90 @@ export const RemoteView: React.FC = () => {
                 ⚠️ Le mode local fonctionne uniquement sur cet écran. Pour projeter les scores, retournez à l'accueil et créez une partie en ligne.
               </div>
             ) : (
-              <div className="w-full space-y-3">
+              <div className="w-full space-y-3.5">
 
                 {/* ── CODE SALON EN TRÈS GRAND ── */}
-                <div className="relative flex flex-col items-center px-5 py-5 bg-black rounded-2xl border-2 border-theme-accent/50 overflow-hidden">
+                <div className="relative flex flex-col items-center px-5 py-4 bg-black rounded-2xl border-2 border-theme-accent/50 overflow-hidden shadow-inner">
                   {/* Halo de fond */}
                   <div className="absolute inset-0 bg-gradient-to-b from-theme-accent/10 to-transparent" />
-                  <p className="text-[9px] text-zinc-500 uppercase font-black tracking-[0.25em] mb-2 z-10">
+                  <p className="text-[9px] text-zinc-500 uppercase font-black tracking-[0.25em] mb-1.5 z-10">
                     Code de la partie — à saisir sur le projecteur
                   </p>
                   <span
-                    className="z-10 text-8xl font-black font-mono tracking-[0.35em] text-theme-accent leading-none"
+                    className="z-10 text-7xl sm:text-8xl font-black font-mono tracking-[0.35em] text-theme-accent leading-none"
                     style={{ textShadow: '0 0 30px rgba(56,189,248,0.7), 0 0 60px rgba(56,189,248,0.3)' }}
                   >
                     {currentRoom.roomId}
                   </span>
-                  <p className="text-[10px] text-zinc-500 mt-3 z-10">
+                  <p className="text-[10px] text-zinc-500 mt-2.5 z-10">
                     Depuis l'accueil sur le projecteur → &ldquo;Rejoindre une partie&rdquo;
                   </p>
                 </div>
 
+                {/* ── GROS BOUTON OUVRIR LE MODE VISUALISATEUR DIRECTEMENT SOUS LE CODE ── */}
+                <div className="w-full space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const projectorUrl = `${window.location.origin}${window.location.pathname}#/projector?room=${currentRoom.roomId}`;
+                      const win = window.open(projectorUrl, '_blank');
+                      if (!win) {
+                        // Fallback si la pop-up est bloquée ou sur écran direct
+                        window.location.hash = `#/projector?room=${currentRoom.roomId}`;
+                      }
+                    }}
+                    className="w-full py-4 px-4 bg-theme-accent hover:bg-theme-accent-hover text-black font-black text-sm sm:text-base rounded-2xl transition-all shadow-xl shadow-theme-accent/25 flex items-center justify-center gap-2.5 cursor-pointer active:scale-98 animate-pulse hover:animate-none"
+                  >
+                    <Tv className="w-5 h-5 stroke-[2.5]" />
+                    <span className="tracking-wide uppercase">OUVRIR LE MODE VISUALISATEUR</span>
+                    <ExternalLink className="w-4 h-4 opacity-80" />
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.location.hash = `#/projector?room=${currentRoom.roomId}`;
+                      }}
+                      className="py-2.5 px-3 bg-zinc-900 border border-zinc-800 hover:border-theme-accent/50 hover:bg-zinc-800 text-zinc-300 hover:text-white font-bold text-[11px] rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
+                      title="Basculer directement cet écran en affichage visualisateur"
+                    >
+                      <Tv className="w-3.5 h-3.5 text-theme-accent" />
+                      <span>Basculer cet écran</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const projectorUrl = `${window.location.origin}${window.location.pathname}#/projector?room=${currentRoom.roomId}`;
+                        navigator.clipboard.writeText(projectorUrl);
+                        setLinkCopied(true);
+                        setTimeout(() => setLinkCopied(false), 2000);
+                      }}
+                      className="py-2.5 px-3 bg-zinc-900 border border-zinc-800 hover:border-theme-accent/50 hover:bg-zinc-800 text-zinc-300 hover:text-white font-bold text-[11px] rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 relative overflow-hidden"
+                      title="Copier le lien direct vers le visualisateur"
+                    >
+                      <span className={`transition-all duration-300 flex items-center gap-1.5 ${linkCopied ? 'opacity-100 scale-100' : 'opacity-0 scale-50 absolute pointer-events-none'}`}>
+                        <Check className="w-3.5 h-3.5 text-green-400" />
+                        <span className="text-green-400">Lien copié !</span>
+                      </span>
+                      <span className={`transition-all duration-300 flex items-center gap-1.5 ${!linkCopied ? 'opacity-100 scale-100' : 'opacity-0 scale-50 absolute pointer-events-none'}`}>
+                        <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>Copier le lien</span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* ── QR CODE LOCAL (Zéro dépendance externe) ── */}
-                <div className="flex items-center gap-4 p-4 bg-black/40 border border-zinc-800/80 rounded-2xl">
+                <div className="flex items-center gap-3.5 p-3.5 bg-black/40 border border-zinc-800/80 rounded-2xl">
                   {(() => {
                     const projectorUrl = `${window.location.origin}${window.location.pathname}#/projector?room=${currentRoom.roomId}`;
                     return (
                       <div className="p-2 bg-[#0a0a0a] border border-zinc-800 rounded-xl flex-shrink-0">
                         <QRCodeSVG
                           value={projectorUrl}
-                          size={90}
+                          size={78}
                           fgColor="#38bdf8"
                           bgColor="#0a0a0a"
                           level="M"
@@ -450,19 +515,19 @@ export const RemoteView: React.FC = () => {
                       </div>
                     );
                   })()}
-                  <div className="text-left flex flex-col gap-1">
+                  <div className="text-left flex flex-col gap-0.5">
                     <span className="text-[10px] text-zinc-500 uppercase font-black tracking-widest">
                       Alternative rapide
                     </span>
                     <p className="text-[11px] text-zinc-300 leading-relaxed">
-                      Flashez ce QR code depuis la caméra du téléphone sur lequel tourne le projecteur pour l'ouvrir directement.
+                      Flashez ce QR code depuis l'appareil du vidéoprojecteur pour l'ouvrir directement.
                     </p>
                   </div>
                 </div>
 
                 {/* ── SÉLECTEUR VUE DU PROJECTEUR ── */}
                 <div className="w-full">
-                  <p className="text-[9px] text-zinc-500 uppercase font-black tracking-[0.2em] mb-2 text-left">
+                  <p className="text-[9px] text-zinc-500 uppercase font-black tracking-[0.2em] mb-1.5 text-left">
                     Vue du projecteur
                   </p>
                   <div className="grid grid-cols-3 gap-1.5">
@@ -474,7 +539,7 @@ export const RemoteView: React.FC = () => {
                       <button
                         key={mode}
                         onClick={() => setRemoteProjectorModeAndSync(mode)}
-                        className={`flex flex-col items-center gap-1 py-2.5 px-2 rounded-xl border text-center transition-all cursor-pointer ${
+                        className={`flex flex-col items-center gap-1 py-2 px-2 rounded-xl border text-center transition-all cursor-pointer ${
                           remoteProjectorMode === mode
                             ? 'bg-theme-accent/10 border-theme-accent text-theme-accent'
                             : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'
@@ -487,38 +552,6 @@ export const RemoteView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* ── BOUTONS D'ACTION ── */}
-                <div className="flex gap-2 pt-1">
-                  <button
-                    onClick={() => {
-                      const projectorUrl = `${window.location.origin}${window.location.pathname}#/projector?room=${currentRoom.roomId}`;
-                      window.open(projectorUrl, '_blank');
-                    }}
-                    className="flex-1 py-3 px-4 bg-theme-accent hover:bg-theme-accent-hover text-black font-extrabold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    <span>OUVRIR NOUVEL ONGLET</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      const projectorUrl = `${window.location.origin}${window.location.pathname}#/projector?room=${currentRoom.roomId}`;
-                      navigator.clipboard.writeText(projectorUrl);
-                      setLinkCopied(true);
-                      setTimeout(() => setLinkCopied(false), 2000);
-                    }}
-                    className="py-3 px-4 bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700 text-white font-extrabold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98 relative overflow-hidden"
-                  >
-                    <span className={`transition-all duration-300 flex items-center gap-1.5 ${linkCopied ? 'opacity-100 scale-100' : 'opacity-0 scale-50 absolute pointer-events-none'}`}>
-                      <Check className="w-4 h-4 text-green-500" />
-                      COPIÉ !
-                    </span>
-                    <span className={`transition-all duration-300 flex items-center gap-1.5 ${!linkCopied ? 'opacity-100 scale-100' : 'opacity-0 scale-50 absolute pointer-events-none'}`}>
-                      <Copy className="w-4 h-4" />
-                      COPIER
-                    </span>
-                  </button>
-                </div>
               </div>
             )}
           </div>
@@ -762,32 +795,6 @@ export const RemoteView: React.FC = () => {
       }
     };
   }, []);
-
-  // Détection et liaison automatique du salon si l'utilisateur est connecté à Google
-  useEffect(() => {
-    // Si on a déjà un roomId, ou si on est en mode local, ou si l'utilisateur n'est pas connecté via Google
-    if (roomId || isLocalMode || !user || user.isAnonymous) return;
-
-    const autoConnectActiveRoom = async () => {
-      try {
-        const rooms = await roomService.getUserActiveRooms(user.uid);
-        if (rooms.length > 0) {
-          const activeRoom = rooms[0];
-          setRoomId(activeRoom.roomId);
-          // Mettre à jour le hash d'URL pour correspondre
-          window.location.hash = `#/remote?room=${activeRoom.roomId}`;
-        }
-      } catch (err) {
-        console.error("Erreur lors de la liaison automatique :", err);
-      }
-    };
-
-    autoConnectActiveRoom();
-    
-    // Vérifier également toutes les 5 secondes si une partie démarre
-    const interval = setInterval(autoConnectActiveRoom, 5000);
-    return () => clearInterval(interval);
-  }, [user, roomId, isLocalMode]);
 
   // Se connecter à un salon existant
   const handleJoinRoom = async (e: React.FormEvent) => {

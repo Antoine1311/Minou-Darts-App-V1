@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Users, Settings, Tv, Check, Target, Crosshair, Clock, RotateCcw, Plus, Play, Trash2, Shuffle } from 'lucide-react';
+import { ArrowLeft, Users, Settings, Tv, Check, Target, Crosshair, Clock, RotateCcw, Plus, Play, Trash2, Shuffle, LogOut } from 'lucide-react';
 import type { RoomData, GameType, CricketVariant } from '../services/roomService';
 import { playerService } from '../services/playerService';
 import { roomService } from '../services/roomService';
@@ -411,6 +411,7 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
         <header className="p-4 bg-black/40 border-b border-theme-border/30 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button 
+              type="button"
               onClick={() => {
                 if (setupStep === 'game') {
                   setSetupStep('players');
@@ -418,9 +419,11 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
                   onExit();
                 }
               }} 
-              className="p-1.5 rounded-lg bg-black/20 text-theme-text-secondary border border-theme-border/20 cursor-pointer"
+              className="p-2 rounded-xl bg-black/40 hover:bg-black/60 active:scale-95 text-theme-text-secondary hover:text-white border border-theme-border/30 cursor-pointer flex items-center justify-center transition-all min-w-[36px] min-h-[36px]"
+              title="Retour"
+              aria-label="Retour"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-5 h-5" />
             </button>
              <div>
               <h1 className="text-sm font-black tracking-wide">SALON : {currentRoom?.roomId}</h1>
@@ -455,9 +458,21 @@ export const RemoteSetupPhase: React.FC<RemoteSetupPhaseProps> = ({
                 <Settings className="w-4 h-4" />
               </button>
             )}
-            <span className="text-[10px] bg-theme-accent/20 text-theme-accent font-bold px-2 py-0.5 rounded">
-              En Attente
-            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (setupStep === 'game') {
+                  setSetupStep('players');
+                } else {
+                  onExit();
+                }
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] bg-red-500/10 border border-red-500/30 hover:border-red-500 hover:bg-red-500/20 text-red-400 font-bold rounded-lg transition-all cursor-pointer uppercase tracking-wider active:scale-95"
+              title="Retour à l'accueil / Quitter le salon"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Retour</span>
+            </button>
           </div>
         </header>
 

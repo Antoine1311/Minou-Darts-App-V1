@@ -154,8 +154,8 @@ export const HomeView: React.FC = () => {
   };
 
   // Rejoindre une partie existante
-  const handleJoinRoom = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleJoinRoom = async (e?: React.FormEvent, target: 'remote' | 'projector' = 'remote') => {
+    if (e) e.preventDefault();
     if (!isOnline) {
       setError("Une connexion Internet est requise pour rejoindre un salon en ligne.");
       return;
@@ -171,7 +171,11 @@ export const HomeView: React.FC = () => {
     try {
       const exists = await roomService.checkRoomExists(code);
       if (exists) {
-        window.location.hash = `#/remote?room=${code}`;
+        if (target === 'projector') {
+          window.location.hash = `#/projector?room=${code}`;
+        } else {
+          window.location.hash = `#/remote?room=${code}`;
+        }
       } else {
         setError("Ce salon n'existe pas. Veuillez vérifier le code à 4 lettres.");
       }
@@ -602,9 +606,19 @@ export const HomeView: React.FC = () => {
                     <Sparkles className="w-3.5 h-3.5 text-theme-accent animate-pulse" />
                     <span>Partie active détectée</span>
                   </h3>
-                  <span className="text-[9px] bg-theme-accent/20 text-theme-accent font-bold px-2 py-0.5 rounded font-mono">
-                    SALON : {activeRooms[0].roomId}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] bg-theme-accent/20 text-theme-accent font-bold px-2 py-0.5 rounded font-mono">
+                      SALON : {activeRooms[0].roomId}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveRooms([])}
+                      className="p-1 text-zinc-500 hover:text-white rounded hover:bg-white/10 transition-colors cursor-pointer"
+                      title="Masquer cette suggestion"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
                 
                 <p className="text-[11px] text-theme-text-secondary mb-4 leading-relaxed">
@@ -665,30 +679,38 @@ export const HomeView: React.FC = () => {
             </div>
 
             {/* 2. Rejoindre via un code */}
-            <form onSubmit={handleJoinRoom} className="w-full flex gap-2">
-              <input
-                type="text"
-                placeholder="CODE"
-                maxLength={4}
-                value={roomIdInput}
-                onChange={(e) => setRoomIdInput(e.target.value.toUpperCase())}
-                disabled={loading || authLoading || !isOnline}
-                className="w-28 p-3.5 bg-black/50 border border-theme-border rounded-xl text-center text-lg font-black tracking-widest text-theme-accent focus:border-theme-accent focus:outline-none transition-all placeholder:text-theme-border/35 disabled:opacity-40"
-              />
-              <button
-                type="submit"
-                disabled={loading || authLoading || roomIdInput.trim().length !== 4 || !isOnline}
-                className="flex-grow py-3.5 bg-black/40 border border-theme-border/80 hover:border-theme-accent hover:bg-theme-accent/5 text-theme-text-primary font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:border-theme-border/80"
-              >
-                {loading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <>
-                    <Users className="w-4 h-4" />
-                    <span>SE CONNECTER</span>
-                  </>
-                )}
-              </button>
+            <form onSubmit={(e) => handleJoinRoom(e, 'remote')} className="w-full space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="CODE"
+                  maxLength={4}
+                  value={roomIdInput}
+                  onChange={(e) => setRoomIdInput(e.target.value.toUpperCase())}
+                  disabled={loading || authLoading || !isOnline}
+                  className="w-24 sm:w-28 p-3.5 bg-black/50 border border-theme-border rounded-xl text-center text-lg font-black tracking-widest text-theme-accent focus:border-theme-accent focus:outline-none transition-all placeholder:text-theme-border/35 disabled:opacity-40"
+                />
+                <button
+                  type="button"
+                  onClick={(e) => handleJoinRoom(e, 'projector')}
+                  disabled={loading || authLoading || roomIdInput.trim().length !== 4 || !isOnline}
+                  className="flex-1 py-3.5 px-3 bg-theme-accent/20 border border-theme-accent/50 hover:bg-theme-accent hover:text-black text-theme-accent font-black text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-30 disabled:pointer-events-none active:scale-98 shadow-md"
+                  title="Rejoindre et afficher le tableau Vidéoprojecteur"
+                >
+                  <Tv className="w-4 h-4" />
+                  <span>PROJECTEUR</span>
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading || authLoading || roomIdInput.trim().length !== 4 || !isOnline}
+                  className="py-3.5 px-3 bg-black/40 border border-theme-border/80 hover:border-theme-accent hover:bg-theme-accent/5 text-theme-text-primary font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-30 disabled:hover:bg-transparent active:scale-98"
+                  title="Rejoindre en tant que Télécommande joueur"
+                >
+                  <Smartphone className="w-4 h-4" />
+                  <span className="hidden sm:inline">TÉLÉCOMMANDE</span>
+                  <span className="sm:hidden">MANETTE</span>
+                </button>
+              </div>
             </form>
 
             {/* Accès Vidéoprojecteur Seul */}
